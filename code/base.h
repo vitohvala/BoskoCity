@@ -1,5 +1,7 @@
 #pragma once
 
+#define STB_SPRINTF_IMPLEMENTATION
+#include "stb_sprintf.h"
 
 #if defined __clang__
 #define COMPILER_CLANG 1
@@ -133,6 +135,11 @@ typedef unsigned int uint;
 
 typedef u32     b32;
 
+#define Kilobyte 1024
+#define Megabyte Kilobyte * 1024
+#define Gigabyte Megabyte * 1024
+
+
 #define KB(x) ((x) << 10)
 #define MB(x) ((x) << 20)
 #define GB(x) ((u64)(x) << 30llu)
@@ -143,7 +150,7 @@ typedef u32     b32;
 #define Billion(x)  ((x)*1000000000llu)
 #define Trillion(x) ((x)*1000000000000llu)
 
-#define nil ((void *)0)
+#define nil (NULL)
 
 #define Statement(x) do { x } while(0)
 
@@ -303,18 +310,14 @@ struct Arena {
     usize prev_offset; //may be useful
 };
 
-
-#define DEBUG_FATAL(name) void name(char *str)
-typedef DEBUG_FATAL(DebugFatalP);
-
-
 struct Console {
-    void (*write)(const char *text);
-    void (*writef)(char *format, ...);
-    DebugFatalP *fatal;
+    void (*writef)(usize level, char *format, ...);
+    void (*writef_error)(char *format, ...);
 };
 
 //global Console console = {};
+
+#define array_len(x) (sizeof(x) / sizeof((x)[0]))
 
 #define DEFAULT_ALIGNMENT (2*sizeof(void *))
 function Arena arena_init(usize cap);
@@ -325,6 +328,14 @@ function void arena_destroy(Arena *arena);
 //intrinsics ????
 extern "C" {
     void *memset(void *, int, size_t);
+    void *memmove( void*, const void*, size_t);
 }
+
+
+#define memcopy(dst, src, size) memmove((dst), (src), (size))
+#define memzero(s,z)       memset((s),0,(z))
+#define memzero_struct(s)  memzero((s),sizeof(*(s)))
+
+#define hv_swap(T, a, b) Statement(T __t = a; a = b; b = __t;)
 
 #include "base.cpp"

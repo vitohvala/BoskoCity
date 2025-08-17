@@ -5,8 +5,10 @@ struct GlContext {
     GLuint program_id;
     uint vao;
     uint transform_loc;
+    void *hdc;
 };
 
+void platform_swap_buffers(void *hdc);
 
 global GlContext gl_context;
 
@@ -19,26 +21,24 @@ gl_debug_callback(GLenum source, GLenum type, GLuint id, GLenum severity,
        severity == GL_DEBUG_SEVERITY_MEDIUM ||
        severity == GL_DEBUG_SEVERITY_HIGH)
     {
-        //TODO remove printf
-        log_errorf("%s\n", (char*)message);
-        //printf("[OPENGL ERROR]: %s\n", message);
-        Assert(false);
+        log_error("%s\n", (char*)message);
     } else {
-        log_infof("%s\n",  (char*)message);
+        log_info("%s\n",  (char*)message);
     }
 }
 
 function void
 gl_vport(u32 width, u32 height)
 {
-
     glViewport(0, 0, width, height);
 }
 
 function b32
-gl_init(Arena *arena)
+gl_init(Arena *arena, void *hdc)
 {
     log_info("Init GL\n");
+
+    gl_context.hdc = hdc;
     gl_load_functions();
     glDebugMessageCallback(&gl_debug_callback, 0);
     glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
@@ -105,7 +105,7 @@ gl_init(Arena *arena)
 
         if(!success) {
             glGetShaderInfoLog(vshader, 512, NULL, infoLog);
-            log_errorf("ERROR SHADER VERTEX COMPILATION_FAILED %s\n", infoLog);
+            log_error("ERROR SHADER VERTEX COMPILATION_FAILED %s\n", infoLog);
         }
     }
 
@@ -119,7 +119,7 @@ gl_init(Arena *arena)
 
         if(!success) {
             glGetShaderInfoLog(fshader, 512, NULL, infoLog);
-            log_errorf("ERROR SHADER VERTEX COMPILATION_FAILED %s\n", infoLog);
+            log_error("ERROR SHADER VERTEX COMPILATION_FAILED %s\n", infoLog);
         }
     }
 
@@ -136,7 +136,7 @@ gl_init(Arena *arena)
 
         if(!success) {
             glGetProgramInfoLog(gl_context.program_id, 512, NULL, infoLog);
-            log_errorf("ERROR SHADER Program link FAILED %s\n", infoLog);
+            log_error("ERROR SHADER Program link FAILED %s\n", infoLog);
         }
     }
 
@@ -154,10 +154,7 @@ gl_init(Arena *arena)
     i32 width, height, nr_channels;
     u8 *data = (u8*)stbi_load("awesomeface.png", &width, &height, &nr_channels, 0);
 
-    if(!data) {
-        Assert(false);
-        Fatal("No img");
-    }
+    hv_assert(data != NULL, "stbi load failed");
 
     u32 texture;
     glGenTextures(1, &texture);
@@ -188,7 +185,12 @@ gl_init(Arena *arena)
     glDepthFunc(GL_GREATER);
 
     arena_reset(arena);
-    log_info("Init complete\n");
+
+    log_info("VENDOR %s\n",  glGetString(GL_VENDOR));
+    log_info("RENDERER %s\n",   glGetString(GL_RENDERER));
+    log_info("VERSION %s\n",  glGetString(GL_VERSION));
+
+    log_info("GL Init complete\n");
     return true;
 }
 
@@ -212,5 +214,7 @@ gl_render(Arena *transient, f32 t1)
     glUniformMatrix4fv(gl_context.transform_loc, 1, GL_FALSE, (GLfloat*)trans->m);
 
     glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    platform_swap_buffers(gl_context.hdc);
 
 }

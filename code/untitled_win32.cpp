@@ -1,4 +1,6 @@
+/*
 
+*/
 
 #include "base.h"
 //#include "base.cpp"
@@ -10,11 +12,21 @@
 #include "gl_renderer.cpp"
 
 #include "game.h"
-
 #include "wglext.h"
 
-#define STB_SPRINTF_IMPLEMENTATION
-#include "stb_sprintf.h"
+#include <d3d11_4.h>
+#include <dxgi.h>
+#include <dxgidebug.h>
+#include <d3dcompiler.h>
+
+#pragma comment(lib, "dxguid")
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "d3dcompiler.lib")
+
+
+#define SAFE_RELEASE(ptr) Statement( if(ptr) ptr->Release(); )
+
 
 /* ====================================================================
 
@@ -22,6 +34,7 @@
 
    ====================================================================*/
 global b32 running;
+global FILETIME shader_time;
 
 typedef BOOL (WINAPI * PFNWGLSWAPINTERVALEXTPROC)(int interval);
     PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT;
@@ -44,6 +57,28 @@ struct Win32GamePath{
     char tmp_dll[MAX_PATH];
 };
 
+struct Constants {
+    Vec2 screensize;
+    Vec2 atlassize;
+};
+
+
+struct DxContext{
+    ID3D11Device *device;
+    ID3D11DeviceContext *dcontext;
+    ID3D11RenderTargetView *framebuffer_rtv;
+    IDXGISwapChain4 *swapchain;
+    D3D11_VIEWPORT viewport;
+    ID3D11VertexShader *vertex_shader;
+    ID3D11PixelShader *pixel_shader;
+    ID3D11ShaderResourceView *sprite_SRV;
+    ID3D11Buffer *sprite_buffer;
+    ID3D11RasterizerState *rstate;
+    ID3D11ShaderResourceView *atlas_SRV;
+    ID3D11SamplerState *sampler;
+    ID3D11Buffer *constant_buffer;
+};
+
 /* ====================================================================
 
                              FUNC DECLARATIONS
@@ -62,16 +97,20 @@ win32_main_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 void *platform_load_glfunc(char *func_name) {
     void *proc = wglGetProcAddress(func_name);
-    Assert(proc != NULL);
+    hv_assert(proc != NULL);
     return (void *)proc;
 }
 
+void platform_swap_buffers(void *hdc) {
+    SwapBuffers((HDC)hdc);
+}
 
 HWND
-win32_create_window(HINSTANCE hInstance, u32 width, u32 height, char *name)
+win32_create_window(u32 width, u32 height, char *name)
 {
+    log_info("Create Window\n");
     //remove HINSTANCE from func parametets?????
-    HMODULE hinstance = hInstance;
+    HMODULE hinstance = (HINSTANCE)GetModuleHandleW(NULL);
     WNDCLASSW wca = {};
     wca.lpfnWndProc = win32_main_proc;
     wca.hInstance = hinstance;
@@ -91,21 +130,89 @@ win32_create_window(HINSTANCE hInstance, u32 width, u32 height, char *name)
                                      0, 0, hinstance, 0);
 
     if(!window_handle) {
-        // log
+        log_error("CreateWindowEx Failed\n");
         running = false;
     }
 
+    log_info("Window created\n");
     return window_handle;
+}
 
+function b32
+was_pressed(ButtonState *state) {
+	b32 result = ((state->htransition_count > 1) ||
+	             ((state->htransition_count == 1) &&
+	             ( state->ended_down)));
+	return result;
 }
 
 function void
-win32_pump_msg(void)
+process_keyboard_message(ButtonState *new_state, b32 is_down) {
+    if (new_state->ended_down != is_down) {
+        new_state->ended_down = is_down;
+        new_state->htransition_count++;
+    }
+}
+
+function void
+win32_pump_msg(GameInput *old_input, GameInput *new_input)
 {
+    ControllerInput *new_keyboard = &new_input->cinput[HV_Keyboard];
+    ControllerInput *old_keyboard = &old_input->cinput[HV_Keyboard];
+    memzero_struct(new_keyboard);
+
+    for(int i = 0; i < (int)array_len(new_keyboard->buttons); i++) {
+        new_keyboard->buttons[i].ended_down = old_keyboard->buttons[i].ended_down;
+    }
+
     MSG msg = {};
     while(PeekMessageW(&msg, 0, 0, 0, PM_REMOVE)) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+        switch(msg.message) {
+        case WM_KEYUP:
+        case WM_KEYDOWN:
+        case WM_SYSKEYUP:
+        case WM_SYSKEYDOWN:
+        {
+            b32 was_down = ((msg.lParam & (1 << 30)) != 0);
+            b32 is_down =  ((msg.lParam & (1 << 31)) == 0);
+            WPARAM vk_code = msg.wParam;
+
+            if(is_down != was_down) {
+                switch(vk_code) {
+                    case 'W':
+                    case VK_UP: {
+                        process_keyboard_message(&new_keyboard->move_up, is_down);
+                    } break;
+                    case 'S':
+                    case VK_DOWN: {
+                        process_keyboard_message(&new_keyboard->move_down, is_down);
+                    } break;
+                    case 'A':
+                    case VK_LEFT: {
+                        process_keyboard_message(&new_keyboard->move_left, is_down);
+                    } break;
+                    case 'D':
+                    case VK_RIGHT: {
+                        process_keyboard_message(&new_keyboard->move_right, is_down);
+                    } break;
+                    case VK_SPACE: {
+                        process_keyboard_message(&new_keyboard->action_up, is_down);
+                    } break;
+                    case 'J': {
+                        process_keyboard_message(&new_keyboard->action_right, is_down);
+                    } break;
+                    case 'K' : {
+                        process_keyboard_message(&new_keyboard->action_down, is_down);
+                    } break;
+                }
+            }
+        } break;
+
+        default :
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+            break;
+        }
     }
 }
 
@@ -134,9 +241,9 @@ win32_gl_prepare(HWND window_handle, int major_v, int minor_v)
 
     {
         HINSTANCE hInstance = (HINSTANCE)GetModuleHandleW(NULL);
-        HWND tmp_window_handle = win32_create_window(hInstance, 1280, 720, "nista");
+        HWND tmp_window_handle = win32_create_window(1280, 720, "nista");
         HDC tmp_dc = GetDC(tmp_window_handle);
-        Assert(tmp_dc != NULL);
+        hv_assert(tmp_dc != NULL, "GetDC failed");
 
         PIXELFORMATDESCRIPTOR pfd = {};
         pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
@@ -149,21 +256,21 @@ win32_gl_prepare(HWND window_handle, int major_v, int minor_v)
         pfd.cStencilBits = 8;
 
         int pixel_format = ChoosePixelFormat(tmp_dc, &pfd);
-        Assert(pixel_format != 0);
+        hv_assert(pixel_format != 0);
 
-        Assert(SetPixelFormat(tmp_dc, pixel_format, &pfd));
+        hv_assert(SetPixelFormat(tmp_dc, pixel_format, &pfd));
 
         HGLRC tmp_rc = wglCreateContext(tmp_dc);
-        Assert(tmp_rc != NULL);
+        hv_assert(tmp_rc != NULL);
 
-        Assert(wglMakeCurrent(tmp_dc, tmp_rc));
+        hv_assert(wglMakeCurrent(tmp_dc, tmp_rc));
 
         wglChoosePixelFormatARB =
             (PFNWGLCHOOSEPIXELFORMATARBPROC)platform_load_glfunc("wglChoosePixelFormatARB");
         wglCreateContextAttribsARB =
             (PFNWGLCREATECONTEXTATTRIBSARBPROC)platform_load_glfunc("wglCreateContextAttribsARB");
 
-        Assert(wglChoosePixelFormatARB || wglCreateContextAttribsARB);
+        hv_assert(wglChoosePixelFormatARB || wglCreateContextAttribsARB);
 
         wglMakeCurrent(tmp_dc, 0);
         wglDeleteContext(tmp_rc);
@@ -189,8 +296,8 @@ win32_gl_prepare(HWND window_handle, int major_v, int minor_v)
     uint pixel_format_count;
     int pixel_format = 0;
 
-    Assert(wglChoosePixelFormatARB != NULL);
-    Assert(wglChoosePixelFormatARB(dc, pixel_attr, 0, 1,
+    hv_assert(wglChoosePixelFormatARB != NULL);
+    hv_assert(wglChoosePixelFormatARB(dc, pixel_attr, 0, 1,
                                    &pixel_format, &pixel_format_count));
 
     //log_infof("%d\n", pixel_format);
@@ -198,7 +305,7 @@ win32_gl_prepare(HWND window_handle, int major_v, int minor_v)
     PIXELFORMATDESCRIPTOR pfd = {};
     DescribePixelFormat(dc, pixel_format, sizeof(PIXELFORMATDESCRIPTOR), &pfd);
 
-    Assert(SetPixelFormat(dc, pixel_format, &pfd));
+    hv_assert(SetPixelFormat(dc, pixel_format, &pfd));
 
     #ifdef BUILD_DEBUG
         int opengl_debug = WGL_CONTEXT_DEBUG_BIT_ARB;
@@ -214,15 +321,293 @@ win32_gl_prepare(HWND window_handle, int major_v, int minor_v)
     };
 
     HGLRC rc = wglCreateContextAttribsARB(dc, 0, context_attr);
-    Assert(rc != 0);
+    hv_assert(rc != 0);
 
-    Assert(wglMakeCurrent(dc, rc));
+    hv_assert(wglMakeCurrent(dc, rc));
 
     wglSwapIntervalEXT =
         (PFNWGLSWAPINTERVALEXTPROC)wglGetProcAddress("wglSwapIntervalEXT");
 
     return dc;
 }
+
+function HRESULT
+compile_shader(char *entrypoint, char *shader_model, ID3DBlob **blob_out)
+{
+    HRESULT res = S_OK;
+
+     UINT flags = D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR | D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS;
+    #ifndef NDEBUG
+        flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+    #else
+        flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    #endif
+
+    //res = D3DCompile(hlsl, sizeof(hlsl), nil, nil, nil, entrypoint, shader_model, flags, 0, blob_out, nil);
+    res = D3DCompileFromFile(L"assets/shader.hlsl", nil, nil, entrypoint, shader_model, flags,
+                             0, blob_out, nil);
+
+    return res;
+}
+
+function void
+d3d_free(DxContext *d)
+{
+    SAFE_RELEASE(d->device);
+    SAFE_RELEASE(d->dcontext);
+    SAFE_RELEASE(d->framebuffer_rtv);
+    SAFE_RELEASE(d->swapchain);
+    SAFE_RELEASE(d->vertex_shader);
+    SAFE_RELEASE(d->pixel_shader);
+    SAFE_RELEASE(d->sprite_SRV);
+    SAFE_RELEASE(d->sprite_buffer);
+    SAFE_RELEASE(d->rstate);
+    SAFE_RELEASE(d->atlas_SRV);
+    SAFE_RELEASE(d->sampler);
+    SAFE_RELEASE(d->constant_buffer);
+}
+
+function DxContext
+d3d_init(HWND handle) {
+    DxContext d3d = {};
+    {
+        D3D_FEATURE_LEVEL feat_levels[] = { D3D_FEATURE_LEVEL_11_0 };
+
+        ID3D11Device *base_device;
+        ID3D11DeviceContext *base_device_ctx;
+
+        uint creation_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+
+        #ifdef DEBUG_BUILD
+            creation_flags |= D3D11_CREATE_DEVICE_DEBUG;
+        #endif
+
+        HRESULT res = D3D11CreateDevice(nil, D3D_DRIVER_TYPE_HARDWARE, nil, creation_flags, &feat_levels[0],
+                        array_len(feat_levels), D3D11_SDK_VERSION, &base_device, nil, &base_device_ctx);
+        hv_assert(SUCCEEDED(res), "CreateDevice failed");
+
+        #ifdef DEBUG_BUILD
+        {
+            ID3D11InfoQueue* info;
+            base_device->QueryInterface(IID_ID3D11InfoQueue, (void**)&info);
+            info->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+            info->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_ERROR, TRUE);
+            info->Release();
+        }
+        {
+            IDXGIInfoQueue* dxgi_info;
+            res = DXGIGetDebugInterface1(0, IID_IDXGIInfoQueue, (void**)&dxgi_info);
+            hv_assert(SUCCEEDED(res));
+            dxgi_info->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+            dxgi_info->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, TRUE);
+            dxgi_info->Release();
+        }
+        #endif
+
+
+        res = base_device->QueryInterface(IID_ID3D11Device, (void**)&d3d.device);
+        hv_assert(SUCCEEDED(res), "base_device->QueryInterface failed");
+
+        res = base_device_ctx->QueryInterface(IID_ID3D11DeviceContext, (void**)&d3d.dcontext);
+        hv_assert(SUCCEEDED(res), "base_device_ctx->QueryInterface failed");
+
+        base_device->Release();
+        base_device_ctx->Release();
+
+        IDXGIDevice *dxgi_device;
+        res = d3d.device->QueryInterface(IID_IDXGIDevice, (void**)&dxgi_device);
+        hv_assert(SUCCEEDED(res), "d3d.device->QueryInterface failed");
+
+        IDXGIAdapter *dxgi_adapter;
+        res = dxgi_device->GetAdapter(&dxgi_adapter);
+        hv_assert(SUCCEEDED(res), "dxgi getadapter  failed");
+
+        DXGI_ADAPTER_DESC adapter_desc;
+        res = dxgi_adapter->GetDesc(&adapter_desc);
+        {
+            char s_temp[128] = {};
+            //TODO utf16 to 8
+            int i = 0;
+            for(i = 0; i < 128; i++) {
+                if (adapter_desc.Description[i] > 31 && adapter_desc.Description[i] < 128) {
+                    s_temp[i] = (char)adapter_desc.Description[i];
+                }
+            }
+            s_temp[i - 1] = '\0';
+            log_info("Graphics Device : %s\n", s_temp);
+        }
+
+        IDXGIFactory2 *dxgi_factory;
+        res = dxgi_adapter->GetParent(IID_IDXGIFactory2, (void**)&dxgi_factory);
+        hv_assert(SUCCEEDED(res), "dxgi adapter->GetParent  failed");
+
+        dxgi_adapter->Release();
+        dxgi_device->Release();
+
+        DXGI_SWAP_CHAIN_DESC1 swd = {};
+        swd.Width  = 0;
+        swd.Height = 0;
+        swd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        swd.Stereo = false;
+        swd.SampleDesc.Count = 1;
+        swd.SampleDesc.Quality = 0;
+        swd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        swd.BufferCount = 2;
+        swd.Scaling     = DXGI_SCALING_STRETCH;
+        swd.SwapEffect  = DXGI_SWAP_EFFECT_DISCARD;
+        swd.AlphaMode   = DXGI_ALPHA_MODE_UNSPECIFIED;
+        swd.Flags       = 0;
+
+        //no msaa????
+
+        IDXGISwapChain1 *swapchain;
+        res = dxgi_factory->CreateSwapChainForHwnd(d3d.device, handle, &swd, nil, nil, &swapchain);
+        hv_assert(SUCCEEDED(res), "CreateSwapChain Failed");
+
+        dxgi_factory->MakeWindowAssociation(handle, DXGI_MWA_NO_ALT_ENTER);
+
+        dxgi_factory->Release();
+
+        swapchain->QueryInterface(IID_IDXGISwapChain4, (void **)&d3d.swapchain);
+        hv_assert(SUCCEEDED(res), "Swapchain queryInterface failed");
+
+        swapchain->Release();
+
+        ID3D11Texture2D *framebuffer;
+        res = d3d.swapchain->GetBuffer(0, IID_ID3D11Texture2D, (void**)&framebuffer);
+        hv_assert(SUCCEEDED(res), "GetBuffer failed");
+
+        res = d3d.device->CreateRenderTargetView(framebuffer, nil, &d3d.framebuffer_rtv);
+        hv_assert(SUCCEEDED(res), "CreateRenderTargetView failed");
+
+        framebuffer->Release();
+
+        d3d.dcontext->OMSetRenderTargets(1, &d3d.framebuffer_rtv, nil);
+
+
+        {
+            DXGI_SWAP_CHAIN_DESC1 swapchain_temp_desc;
+            d3d.swapchain->GetDesc1(&swapchain_temp_desc);
+            d3d.viewport = {};
+            d3d.viewport.Width = (f32)swapchain_temp_desc.Width;
+            d3d.viewport.Height = (f32)swapchain_temp_desc.Height;
+            d3d.viewport.MaxDepth = 1;
+            d3d.dcontext->RSSetViewports(1, &d3d.viewport);
+            log_info("Swapchain window width %d\n", swapchain_temp_desc.Width);
+            log_info("Swapchain window Height %d\n", swapchain_temp_desc.Height);
+        }
+
+        ID3DBlob *vs_blob;
+
+        compile_shader("vs_main", "vs_5_0", &vs_blob);
+
+        res = d3d.device->CreateVertexShader(vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), nil, &d3d.vertex_shader);
+        hv_assert(SUCCEEDED(res), "CreateVertexShader failed");
+
+        vs_blob->Release();
+
+        ID3DBlob *ps_blob;
+
+        compile_shader("ps_main", "ps_5_0", &ps_blob);
+
+        res = d3d.device->CreatePixelShader(ps_blob->GetBufferPointer(), ps_blob->GetBufferSize(), nil, &d3d.pixel_shader);
+        hv_assert(SUCCEEDED(res), "CreatePixelShader failed");
+
+        ps_blob->Release();
+
+        D3D11_RASTERIZER_DESC rdesc = {};
+        rdesc.FillMode = D3D11_FILL_SOLID;
+        rdesc.CullMode = D3D11_CULL_NONE;
+        rdesc.FrontCounterClockwise = false;
+        rdesc.DepthClipEnable = true;
+        rdesc.MultisampleEnable = true;
+        rdesc.AntialiasedLineEnable = true;
+        rdesc.ScissorEnable = false;
+
+        res = d3d.device->CreateRasterizerState(&rdesc, &d3d.rstate);
+        hv_assert(SUCCEEDED(res), "CreateRasterizerState failed");
+
+        /*
+                might be useful
+                D3D11_RECT scissor_rect;
+                scissor_rect.left = (LONG)vp.TopLeftX;
+                scissor_rect.top = (LONG)vp.TopLeftY;
+                scissor_rect.right = (LONG)(vp.TopLeftX + vp.Width);
+                scissor_rect.bottom = (LONG)(vp.TopLeftY + vp.Height);
+
+                d3.context->RSSetScissorRects(1, &scissor_rect);
+        */
+
+        int twidth = 0, theight = 0, nr_channels = 0;
+        u8 *image_data = (u8*)stbi_load("assets/atlas.png", &twidth, &theight, &nr_channels, 4);
+        hv_assert(image_data != nil, "Image data is null");
+
+        D3D11_TEXTURE2D_DESC texture_desc = {};
+        texture_desc.Width      = u32(twidth);
+        texture_desc.Height     = u32(theight);
+        texture_desc.MipLevels  = 1;
+        texture_desc.ArraySize  = 1;
+        texture_desc.Format     = DXGI_FORMAT_B8G8R8A8_UNORM;
+        texture_desc.SampleDesc.Count = 1;
+        texture_desc.Usage      = D3D11_USAGE_IMMUTABLE;
+        texture_desc.BindFlags  = D3D11_BIND_SHADER_RESOURCE;
+
+
+        D3D11_SUBRESOURCE_DATA texture_data = {};
+        texture_data.pSysMem = &image_data[0];
+        texture_data.SysMemPitch = (u32)twidth * 4;
+
+        ID3D11Texture2D *texture = {};
+        res = d3d.device->CreateTexture2D(&texture_desc, &texture_data, &texture);
+        hv_assert(SUCCEEDED(res), "CreateTexture2d failed");
+
+        d3d.device->CreateShaderResourceView(texture, nil, &d3d.atlas_SRV);
+
+        D3D11_BUFFER_DESC sprite_buffer_desc = {};
+        sprite_buffer_desc.ByteWidth           = MAX_SPRITES * sizeof(Sprite);
+        sprite_buffer_desc.Usage               = D3D11_USAGE_DYNAMIC;
+        sprite_buffer_desc.BindFlags           = D3D11_BIND_SHADER_RESOURCE;
+        sprite_buffer_desc.CPUAccessFlags      = D3D11_CPU_ACCESS_WRITE;
+        sprite_buffer_desc.MiscFlags           = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+        sprite_buffer_desc.StructureByteStride = sizeof(Sprite);
+
+        d3d.device->CreateBuffer(&sprite_buffer_desc, nil, &d3d.sprite_buffer);
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC sprite_srv_desc = {};
+        sprite_srv_desc.Format = DXGI_FORMAT_UNKNOWN;
+        sprite_srv_desc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+        sprite_srv_desc.Buffer.NumElements = MAX_SPRITES;
+
+        d3d.device->CreateShaderResourceView(d3d.sprite_buffer, &sprite_srv_desc, &d3d.sprite_SRV);
+
+        D3D11_SAMPLER_DESC sampler_desc = {};
+        sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler_desc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+        sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+
+        res = d3d.device->CreateSamplerState(&sampler_desc, &d3d.sampler);
+        hv_assert(SUCCEEDED(res), "Create sampler state failed");
+
+        float constantData[4] = { d3d.viewport.Width,d3d.viewport.Height, 511.0f, 110.0f };
+
+        D3D11_BUFFER_DESC constant_buffer_desc = {};
+        constant_buffer_desc.ByteWidth = sizeof(constantData) + 0xf & 0xfffffff0;
+        constant_buffer_desc.Usage = D3D11_USAGE_IMMUTABLE; // maybe change this???
+        constant_buffer_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+
+        D3D11_SUBRESOURCE_DATA constant_srd = {constantData };
+
+        d3d.device->CreateBuffer(&constant_buffer_desc, &constant_srd, &d3d.constant_buffer);
+
+        texture->Release();
+        stbi_image_free(image_data);
+    }
+
+    return d3d;
+}
+
 
 function LPVOID
 format_err_msg(DWORD dw) {
@@ -243,47 +628,86 @@ format_err_msg(DWORD dw) {
     return lpMsgBuf;
 }
 
+
+//TODO: use string8????
 function void
-win32_console_write(const char *text)
+win32_console_write(char *text, usize level)
 {
     //puts(text);
+    HANDLE h =  GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD text_len = (DWORD)strlen(text);
+
+    char *fstr[] =  { "[WARN]: ", "[INFO]: ", "[DEBUG]: ", "[TRACE]: " };
+
+    DWORD number_written = 0;
+    WriteFile(h, fstr[level], (DWORD)strlen(fstr[level]), &number_written, 0);
+
+    if (WriteFile(h, text, text_len, &number_written, 0) == 0) {
+        LPVOID lpMsgBuf = format_err_msg(GetLastError());
+        puts((char *)lpMsgBuf);
+    }
+
     OutputDebugStringA(text);
 }
 
 function void
-win32_console_writef(char *fmt, ...)
+win32_write_error(char *text)
+{
+    #ifdef OS_GRAPHICAL
+        DWORD dw = GetLastError();
+        LPVOID lpMsgBuf = format_err_msg(dw);
+        char errstr[1024];
+        usize pstr_len = strlen(text);
+        strncpy_s(errstr, sizeof(errstr), text, pstr_len);
+        strncpy_s(errstr + pstr_len, sizeof(errstr) - pstr_len, (char *)lpMsgBuf,
+                  strlen((char*)lpMsgBuf));
+        int errmsg = MessageBoxA(0, errstr, "Error", MB_OK | MB_ICONERROR);
+
+        LocalFree(lpMsgBuf);
+        ExitProcess(dw);
+    #else
+
+        HANDLE h =  GetStdHandle(STD_ERROR_HANDLE);
+        DWORD text_len = (DWORD)strlen(text);
+
+        DWORD number_written = 0;
+        WriteFile(h, "[ERROR]: ", 8, &number_written, 0);
+
+        if (WriteFile(h, text, text_len, &number_written, 0) == 0) {
+            LPVOID lpMsgBuf = format_err_msg(GetLastError());
+            puts((char *)lpMsgBuf);
+        }
+
+        OutputDebugStringA(text);
+    #endif
+    running = 0;
+}
+
+function void
+win32_writef_error(char *fmt, ...)
 {
     char buffer[2048];
     va_list args;
-    //TODO: my own vsnprintf
+
     va_start(args, fmt);
     stbsp_vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    OutputDebugStringA(buffer);
-    //arena_reset(arena);
+    win32_write_error(buffer);
 }
 
 function void
-win32_log_fatal(char *str)
+win32_console_writef(usize level, char *fmt, ...)
 {
-    //MessageBoxA(0, "Error", "Test", MB_OK);
-    LPVOID lpMsgBuf = format_err_msg(GetLastError());
-    char errstr[1024];
-    usize pstr_len = strlen(str);
-    strncpy_s(errstr, sizeof(errstr), str, pstr_len);
-    strncpy_s(errstr + pstr_len, sizeof(errstr) - pstr_len, (char *)lpMsgBuf,
-              strlen((char*)lpMsgBuf));
-    int errmsg = MessageBoxA(0, errstr, "Error", MB_OK | MB_ICONERROR);
+    char buffer[2048];
+    va_list args;
 
-    LocalFree(lpMsgBuf);
-    //ExitProcess(dw);
+    va_start(args, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
 
-    running = 0;
-}
-
-DEBUG_FATAL(untitled_fatal) {
-    win32_log_fatal(str);
+    win32_console_write(buffer, level);
+    OutputDebugStringA(buffer);
 }
 
 
@@ -360,12 +784,77 @@ win32_hot_reload(Win32GameCode *game, Win32GamePath *p)
     }
 }
 
+function inline void
+win32_hot_reload_shader(DxContext *d)
+{
+    FILETIME shader_tmp_ft = win32_get_file_last_writetime("assets/shader.hlsl");
+
+    if((CompareFileTime(&shader_tmp_ft, &shader_time)) != 0) {
+        log_info("shader reloaded\n");
+        shader_time = win32_get_file_last_writetime("assets/shader.hlsl");
+        HRESULT res = S_OK;
+        ID3DBlob *vs_blob;
+
+        compile_shader("vs_main", "vs_5_0", &vs_blob);
+
+        res = d->device->CreateVertexShader(vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), nil, &d->vertex_shader);
+        hv_assert(SUCCEEDED(res), "CreateVertexShader failed");
+
+        vs_blob->Release();
+
+        ID3DBlob *ps_blob;
+
+        compile_shader("ps_main", "ps_5_0", &ps_blob);
+
+        res = d->device->CreatePixelShader(ps_blob->GetBufferPointer(), ps_blob->GetBufferSize(), nil, &d->pixel_shader);
+        hv_assert(SUCCEEDED(res), "CreatePixelShader failed");
+
+        ps_blob->Release();
+    }
+}
+
+function inline void
+d3d_render(DxContext *d, SpriteBatch *sb, b32 vsync = true)
+{
+    D3D11_MAPPED_SUBRESOURCE spr_msr = {};
+
+    d->dcontext->Map(d->sprite_buffer, 0,  D3D11_MAP_WRITE_DISCARD, nil, &spr_msr);
+    {
+        memcopy(spr_msr.pData, &sb->sprite[0], sb->count * sizeof(Sprite));
+    }
+    d->dcontext->Unmap(d->sprite_buffer, 0);
+
+    d->dcontext->ClearRenderTargetView(d->framebuffer_rtv, (f32[]){0.0f, 0.0f, 0.0f, 1.0f});
+
+    d->dcontext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    d->dcontext->RSSetState(d->rstate);
+
+    d->dcontext->VSSetShader(d->vertex_shader, nil, 0);
+    d->dcontext->VSSetShaderResources(0, 1, &d->sprite_SRV);
+    d->dcontext->VSSetConstantBuffers(0, 1, &d->constant_buffer);
+    d->dcontext->PSSetShader(d->pixel_shader, nil, 0);
+    d->dcontext->PSSetShaderResources(1, 1, &d->atlas_SRV);
+    d->dcontext->PSSetSamplers(0, 1, &d->sampler);
+
+    d->dcontext->DrawInstanced(6, sb->count, 0, 0);
+
+    d->swapchain->Present(vsync, {});
+}
+
 int WINAPI
 WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         LPSTR lpCmdLine, int nCmdShow)
 {
     running = true;
-    HWND window_handle = win32_create_window(hInstance, 1280, 720, "Bosko City");
+
+
+
+    Console logger = {};
+    logger.writef = &win32_console_writef;
+    logger.writef_error = &win32_writef_error;
+    set_console(&logger);
+
+    HWND window_handle = win32_create_window(1280, 720, "Bosko City");
 
     void *memory_buffer = VirtualAlloc((LPVOID)TB(2), GB(2),
                                        MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
@@ -375,79 +864,74 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                                  MB(1000));
     Arena temp_arena = arena_init((void *)(permanent.buffer + permanent.cap), MB(32));
 
-    //win32_log_fatal("test");
-    Console c = {};
-    c.fatal = &untitled_fatal;
-    c.write = &win32_console_write;
-    c.writef = &win32_console_writef;
-
-    set_console(&c);
-
     Win32GamePath gamepath = win32_load_gamepath();
     Win32GameCode game = {};
     win32_load_gamecode(&gamepath, &game);
 
-    Assert(game.update != NULL);
+    hv_assert(game.update != NULL);
 
     Memory mem = {};
-    mem.transient = transient;
-    mem.permanent = permanent;
-    mem.temp = temp_arena;
-
-    mem.log = c;
-
+    mem.transient = &transient;
+    mem.permanent = &permanent;
+    mem.temp = &temp_arena;
+    mem.log = &logger;
     mem.is_init = false;
 
-    HDC gl_dc = win32_gl_prepare(window_handle, 4, 5);
-    gl_init(&temp_arena);
-    gl_vport(1280, 720);
+    DxContext d = d3d_init(window_handle);
+    shader_time = win32_get_file_last_writetime("assets/shader.hlsl");
+
+    //HDC gl_dc = win32_gl_prepare(window_handle, 4, 5);
+    //gl_init(&temp_arena, (void*)gl_dc);
+    //gl_vport(1280, 720);
+
 
     //disable vsync
     //wglSwapIntervalEXT(0);
-
-    log_infof("VENDOR %s\n",  glGetString(GL_VENDOR));
-    log_infof("RENDERER %s\n",   glGetString(GL_RENDERER));
-    log_infof("VERSION %s\n",  glGetString(GL_VERSION));
-
-    ShowWindow(window_handle, SW_SHOW);
+    if(running) ShowWindow(window_handle, SW_SHOW);
 
     u64 pfreq = win32_get_perf_freq();
-
     u64 fcounter = win32_get_perf_counter();
-    u64 startc = fcounter;
-    f32 t1 = 0.0f;
 
     f32 dt = 0;
 
+    GameInput input[2] = {};
+    GameInput *old_input = &input[0];
+    GameInput *new_input = &input[1];
+
     while(running) {
         win32_hot_reload(&game, &gamepath);
+        win32_hot_reload_shader(&d);
 
-        win32_pump_msg();
+        win32_pump_msg(old_input, new_input);
+        mem.input = new_input;
+
+        SpriteBatch sb = {};
+        sb.count = 0;
+        sb.sprite = (Sprite*)arena_alloc(&transient, MAX_SPRITES * sizeof(Sprite));
+
+        mem.sb = &sb;
 
         if(game.update) game.update(&mem);
 
-        t1 = ((f32)win32_get_perf_counter() - (f32)startc) / (f32)pfreq;
-
-        gl_render(&transient, t1);
+        d3d_render(&d, &sb);
 
         u64 ecounter = win32_get_perf_counter();
-        dt = (f32)(ecounter - fcounter) / (f32)pfreq;
-
+        dt = ((f32)ecounter - (f32)fcounter) / (f32)pfreq;
         fcounter = ecounter;
+        mem.dt = dt;
 
-        f32 ms_per_frame = 1000 * dt;
+        hv_swap(GameInput* , new_input, old_input);
 
-        log_infof("ms = %.2f\n", ms_per_frame);
-
-        SwapBuffers(gl_dc);
         arena_reset(&transient);
         arena_reset(&temp_arena);
+
     }
 
     if (window_handle) {
         DestroyWindow(window_handle);
     }
 
+    d3d_free(&d);
     VirtualFree(memory_buffer, 0, MEM_RELEASE);
     return 0;
 }

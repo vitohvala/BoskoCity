@@ -650,35 +650,73 @@ arena_init(void *buffer, usize cap)
     return a;
 }
 
-global Console console;
-
 function void
 arena_reset(Arena *arena)
 {
     arena->curr_offset = arena->prev_offset = 0;
 }
 
-function inline void
-log_error(char *text)
+function int
+vsnprintf(char *buf, int count, char const *fmt, va_list va)
 {
-    console.write("[ERROR]: ");
-    console.write(text);
+    return stbsp_vsnprintf(buf, count, fmt, va);
 }
 
-function inline void
-log_info(char *text)
-{
-    console.write("[INFO]: ");
-    console.write(text);
-}
 
-#define log_infof(...) Statement( console.write("[INFO]: ");console.writef(__VA_ARGS__);)
-#define log_errorf(...) Statement( console.write("[ERROR]: "); console.writef(__VA_ARGS__); )
+global Console console;
 
-#define Fatal(x) console.fatal(x)
+#define log_warn(...)  Statement( console.writef(0, __VA_ARGS__);)
+#define log_info(...)  Statement( console.writef(1, __VA_ARGS__);)
+#define log_debug(...) Statement( console.writef(2, __VA_ARGS__);)
+#define log_trace(...) Statement( console.writef(3, __VA_ARGS__);)
+#define log_error(...) Statement( console.writef_error(__VA_ARGS__); )
+#define fatal(...)     Statement( console.writef_error(__VA_ARGS__); )
 
 function void
 set_console(Console *c)
 {
     console = *c;
+}
+
+function inline
+void hv_assert(b32 assertion, char *fmt = '\0', ...) {
+    #ifdef OS_GRAPHICAL
+    if (!assertion) {
+        if(fmt) {
+            char buffer[2048];
+            va_list args;
+
+            va_start(args, fmt);
+            vsnprintf(buffer, sizeof(buffer), fmt, args);
+            va_end(args);
+
+            log_error(buffer);
+        } else {
+            log_error("Assertion");
+        }
+    }
+    #else
+    Assert(assertion);
+    #endif
+}
+
+function usize
+hv_strlen(char *text)
+{
+    usize len = 0;
+    for(usize i = 0; text[i] != '\0'; i++) {
+        len++;
+    }
+    return len;
+}
+
+function String8
+str8(Arena *a, char *text)
+{
+    String8 result;
+
+    result.len = hv_strlen(text);
+    result.data = (u8*)arena_alloc(a, result.len);
+    result.data = (u8*)text;
+    return result;
 }
