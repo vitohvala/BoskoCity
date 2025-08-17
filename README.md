@@ -1,2 +1,3 @@
 # BoskoCity
-opengl from scrath
+
+zgodan ko bosko city
