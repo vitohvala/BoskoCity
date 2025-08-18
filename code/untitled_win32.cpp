@@ -138,21 +138,7 @@ win32_create_window(u32 width, u32 height, char *name)
     return window_handle;
 }
 
-function b32
-was_pressed(ButtonState *state) {
-	b32 result = ((state->htransition_count > 1) ||
-	             ((state->htransition_count == 1) &&
-	             ( state->ended_down)));
-	return result;
-}
 
-function void
-process_keyboard_message(ButtonState *new_state, b32 is_down) {
-    if (new_state->ended_down != is_down) {
-        new_state->ended_down = is_down;
-        new_state->htransition_count++;
-    }
-}
 
 function void
 win32_pump_msg(GameInput *old_input, GameInput *new_input)
@@ -343,9 +329,15 @@ compile_shader(char *entrypoint, char *shader_model, ID3DBlob **blob_out)
         flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
     #endif
 
+    ID3DBlob *error_blob;
     //res = D3DCompile(hlsl, sizeof(hlsl), nil, nil, nil, entrypoint, shader_model, flags, 0, blob_out, nil);
     res = D3DCompileFromFile(L"assets/shader.hlsl", nil, nil, entrypoint, shader_model, flags,
-                             0, blob_out, nil);
+                             0, blob_out, &error_blob);
+
+    if (error_blob != nil) {
+        log_warn((char*)error_blob->GetBufferPointer());
+        error_blob->Release();
+    }
 
     return res;
 }
@@ -741,7 +733,6 @@ win32_load_gamepath(void) {
     return ret;
 }
 
-
 function inline FILETIME
 win32_get_file_last_writetime(char *FileName) {
     FILETIME Result = {};
@@ -780,6 +771,7 @@ win32_hot_reload(Win32GameCode *game, Win32GamePath *p)
             game->dll = 0;
             game->update = NULL;
         }
+        log_info("Game Code reloaded");
         win32_load_gamecode(p, game);
     }
 }
@@ -790,26 +782,37 @@ win32_hot_reload_shader(DxContext *d)
     FILETIME shader_tmp_ft = win32_get_file_last_writetime("assets/shader.hlsl");
 
     if((CompareFileTime(&shader_tmp_ft, &shader_time)) != 0) {
+
         log_info("shader reloaded\n");
         shader_time = win32_get_file_last_writetime("assets/shader.hlsl");
         HRESULT res = S_OK;
         ID3DBlob *vs_blob;
 
-        compile_shader("vs_main", "vs_5_0", &vs_blob);
+        res = compile_shader("vs_main", "vs_5_0", &vs_blob);
+        if (FAILED(res) || !vs_blob) {
+            log_warn("Vertex Shader Compilation failed\n");
+            log_warn("Using old Vertex shader\n");
+        } else {
+            res = d->device->CreateVertexShader(vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), nil, &d->vertex_shader);
+            log_trace("Compiled Vertex Shader successfully\n");
+            vs_blob->Release();
+        }
 
-        res = d->device->CreateVertexShader(vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), nil, &d->vertex_shader);
-        hv_assert(SUCCEEDED(res), "CreateVertexShader failed");
-
-        vs_blob->Release();
 
         ID3DBlob *ps_blob;
 
-        compile_shader("ps_main", "ps_5_0", &ps_blob);
+        res = compile_shader("ps_main", "ps_5_0", &ps_blob);
+        if (FAILED(res) || !ps_blob) {
+            log_warn("Pixel Shader Compilation failed\n");
+            log_warn("Using old Pixel shader\n");
+        } else {
+            res = d->device->CreatePixelShader(ps_blob->GetBufferPointer(), ps_blob->GetBufferSize(), nil, &d->pixel_shader);
+            //assert!!!
+            log_trace("Compiled Pixel Shader successfully\n");
 
-        res = d->device->CreatePixelShader(ps_blob->GetBufferPointer(), ps_blob->GetBufferSize(), nil, &d->pixel_shader);
-        hv_assert(SUCCEEDED(res), "CreatePixelShader failed");
+            ps_blob->Release();
+        }
 
-        ps_blob->Release();
     }
 }
 
@@ -883,7 +886,6 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     //HDC gl_dc = win32_gl_prepare(window_handle, 4, 5);
     //gl_init(&temp_arena, (void*)gl_dc);
     //gl_vport(1280, 720);
-
 
     //disable vsync
     //wglSwapIntervalEXT(0);

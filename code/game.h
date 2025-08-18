@@ -423,3 +423,18 @@ Animation animations[] =  {
 	{ Body_Template38, Body_Template49 },
 };
 
+function b32
+was_pressed(ButtonState *state) {
+	b32 result = ((state->htransition_count > 1) ||
+	             ((state->htransition_count == 1) &&
+	             ( state->ended_down)));
+	return result;
+}
+
+function void
+process_keyboard_message(ButtonState *new_state, b32 is_down) {
+    if (new_state->ended_down != is_down) {
+        new_state->ended_down = is_down;
+        new_state->htransition_count++;
+    }
+}

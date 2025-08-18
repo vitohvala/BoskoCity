@@ -65,6 +65,16 @@ draw_sprite_v2(SpriteBatch *sb, Vec2 pos, TextureName tname,Vec3 color = vec3(1.
 	hv_append(sb, sb_pos, sprite, color);
 }
 
+function inline void
+anim_helper(usize *animate_index, usize animation_index)
+{
+		if (*animate_index < animations[animation_index].first_frame
+		   || *animate_index > animations[animation_index].last_frame)
+		{
+			*animate_index = animations[animation_index].first_frame;
+		}
+}
+
 function void
 init_game(Memory *mem)
 {
@@ -80,10 +90,13 @@ init_game(Memory *mem)
 	mem->state->pos = {};
 }
 
+
+
 UPDATE_FUNC(game_update)
 {
     if(!m->is_init) {
 		init_game(m);
+    	log_info("gamecode loaded\n");
     }
 	GameState *lstate = m->state;
 
@@ -98,7 +111,9 @@ UPDATE_FUNC(game_update)
 		lstate->animate_index++;
 		lstate->animatet = 0.0f;
 		if(lstate->animate_index > lstate->animation.last_frame){
-			lstate->animate_index = lstate->animation.first_frame;
+			m->state->animation_index = Body_Template_Idle;
+			anim_helper(&lstate->animate_index, lstate->animation_index);
+			//lstate->animate_index = lstate->animation.first_frame;
 		}
 	}
 
@@ -106,14 +121,23 @@ UPDATE_FUNC(game_update)
 
 	if(kinput->move_right.ended_down) {
 		lstate->pos.x += 120.f * m->dt;
+		m->state->animation_index = Body_Template_Run;
+		anim_helper(&lstate->animate_index, lstate->animation_index);
 	} else if(kinput->move_left.ended_down) {
 		lstate->pos.x -= 120.f * m->dt;
+		m->state->animation_index = Body_Template_Walk;
+		anim_helper(&lstate->animate_index, lstate->animation_index);
 	}
 
 	if(kinput->move_up.ended_down) {
 		lstate->pos.y -= 120.f * m->dt;
 	} else if (kinput->move_down.ended_down) {
 		lstate->pos.y += 120.0f * m->dt;
+	}
+
+	if(was_pressed(&kinput->action_up)) {
+		m->state->animation_index = Body_Template_Flat_Jump;
+		anim_helper(&lstate->animate_index, lstate->animation_index);
 	}
 
     draw_sprite(m->sb, {lstate->pos.x, lstate->pos.y, 32, 32},
