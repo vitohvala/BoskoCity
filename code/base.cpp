@@ -720,3 +720,18 @@ str8(Arena *a, char *text)
     result.data = (u8*)text;
     return result;
 }
+
+function String8
+tmp_format_str8(Arena *allocator, char *fmt, ...)
+{
+    String8 buffer;
+    buffer.data = (u8*)arena_alloc(allocator, 2048);
+
+    va_list args;
+
+    va_start(args, fmt);
+    buffer.len = stbsp_vsnprintf((char*)buffer.data, 2047, fmt, args);
+    va_end(args);
+
+    return buffer;
+}

@@ -190,6 +190,9 @@ win32_pump_msg(GameInput *old_input, GameInput *new_input)
                     case 'K' : {
                         process_keyboard_message(&new_keyboard->action_down, is_down);
                     } break;
+                    case 'R' : {
+                        process_keyboard_message(&new_keyboard->start, is_down);
+                    } break;
                 }
             }
         } break;
@@ -539,7 +542,7 @@ d3d_init(HWND handle) {
         texture_desc.Height     = u32(theight);
         texture_desc.MipLevels  = 1;
         texture_desc.ArraySize  = 1;
-        texture_desc.Format     = DXGI_FORMAT_B8G8R8A8_UNORM;
+        texture_desc.Format     = DXGI_FORMAT_R8G8B8A8_UNORM;
         texture_desc.SampleDesc.Count = 1;
         texture_desc.Usage      = D3D11_USAGE_IMMUTABLE;
         texture_desc.BindFlags  = D3D11_BIND_SHADER_RESOURCE;
@@ -582,7 +585,7 @@ d3d_init(HWND handle) {
         res = d3d.device->CreateSamplerState(&sampler_desc, &d3d.sampler);
         hv_assert(SUCCEEDED(res), "Create sampler state failed");
 
-        float constantData[4] = { d3d.viewport.Width,d3d.viewport.Height, 511.0f, 110.0f };
+        float constantData[4] = { d3d.viewport.Width,d3d.viewport.Height, (f32)twidth, (f32)theight };
 
         D3D11_BUFFER_DESC constant_buffer_desc = {};
         constant_buffer_desc.ByteWidth = sizeof(constantData) + 0xf & 0xfffffff0;
@@ -760,7 +763,7 @@ win32_load_gamecode(Win32GamePath *p, Win32GameCode *game) {
     }
 }
 
-function inline void
+function inline b32
 win32_hot_reload(Win32GameCode *game, Win32GamePath *p)
 {
     FILETIME tmp_dll_filetime = win32_get_file_last_writetime(p->dll);
@@ -771,9 +774,11 @@ win32_hot_reload(Win32GameCode *game, Win32GamePath *p)
             game->dll = 0;
             game->update = NULL;
         }
-        log_info("Game Code reloaded");
+        log_info("Game Code reloaded\n");
         win32_load_gamecode(p, game);
+        return true;
     }
+    return false;
 }
 
 function inline void
@@ -849,8 +854,7 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         LPSTR lpCmdLine, int nCmdShow)
 {
     running = true;
-
-
+    AllocConsole();
 
     Console logger = {};
     logger.writef = &win32_console_writef;
@@ -901,7 +905,9 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     GameInput *new_input = &input[1];
 
     while(running) {
-        win32_hot_reload(&game, &gamepath);
+        if(win32_hot_reload(&game, &gamepath)) {
+            mem.is_init = 2;
+        }
         win32_hot_reload_shader(&d);
 
         win32_pump_msg(old_input, new_input);
@@ -959,7 +965,7 @@ win32_main_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
             u32 width = r.right - r.left;
             u32 height = r.bottom - r.top;
 
-            gl_vport(width, height);
+
         } break;
 
         case WM_KEYDOWN:
