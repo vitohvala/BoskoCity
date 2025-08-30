@@ -42,7 +42,6 @@ draw_text(SpriteBatch *sb, Vec2 pos, String8 text, Vec3 color = vec3(1.0f))
 		hv_append(sb, (Vec4){startx1, starty1, endx, endy}, fnt.rect, color);
 
 		startx += (f32)fnt.advance_x;
-
 	}
 }
 
@@ -137,23 +136,27 @@ handle_input(GameState *state, ControllerInput *kinput, f32 dt)
 	}
 }
 
-int startx = 0;
-int starty = 0;
-
 UPDATE_FUNC(game_update)
 {
 	if(m->is_init == 2) {
 		set_console(m->log);
 		m->is_init = true;
+		m->state->level = (u32 *)game_level5;
 	}
     if(!m->is_init) {
 		init_game(m);
     	log_info("gamecode loaded\n");
     	m->state->level = (u32 *)game_level5;
-    }
+    	m->sb = (SpriteBatch *)arena_alloc(m->permanent, sizeof(SpriteBatch));
+		m->state->startx = m->state->starty = 0;
+	}
+
+	m->sb->sprite = (Sprite*)arena_alloc(m->transient, MAX_SPRITES * sizeof(Sprite));
+	m->sb->count = 0;
 
 	GameState *lstate = m->state;
 	ControllerInput *kinput = &m->input->cinput[HV_Keyboard];
+	int startx = lstate->startx, starty = lstate->starty;
 
 	lstate->vel.y += 2000 * m->dt;
 	handle_input(lstate, kinput, m->dt);
@@ -181,15 +184,13 @@ UPDATE_FUNC(game_update)
 
 	Vec2 nextpos = lstate->pos + (lstate->vel * m->dt);
 
-	int mnext_posx = CLAMP(((int)nextpos.x + 32) / TILE_SIZE + startx, 0, GAME_LEVEL_WIDTH - 1);
-	int mnext_posw = CLAMP(((int)nextpos.x)      / TILE_SIZE + startx, 0, GAME_LEVEL_WIDTH - 1);
-	int posx = 		 CLAMP(((int)lstate->pos.x)  / TILE_SIZE + startx, 0, GAME_LEVEL_WIDTH - 1);
+	int mnext_posx = CLAMP(0, ((int)nextpos.x + 32) / TILE_SIZE + startx, GAME_LEVEL_WIDTH - 1);
+	int mnext_posw = CLAMP(0, ((int)nextpos.x)      / TILE_SIZE + startx, GAME_LEVEL_WIDTH - 1);
+	int posx = 		 CLAMP(0, ((int)lstate->pos.x)  / TILE_SIZE + startx, GAME_LEVEL_WIDTH - 1);
 
-	int mnext_posy = CLAMP((((int)nextpos.y + 32)) / TILE_SIZE + starty, 0, GAME_LEVEL_HEIGHT - 1);
-	int mnext_posh = CLAMP((((int)nextpos.y))      / TILE_SIZE + starty, 0, GAME_LEVEL_HEIGHT - 1);
-	int posy = 		 CLAMP(((int)lstate->pos.y)    / TILE_SIZE + starty, 0, GAME_LEVEL_HEIGHT - 1);
-
-	draw_text(m->sb, {0, 0}, tmp_format_str8(m->transient, "posx  %d posy  %d", posx, posy), HV_RED);
+	int mnext_posy = CLAMP(0, (((int)nextpos.y + 32)) / TILE_SIZE + starty, GAME_LEVEL_HEIGHT - 1);
+	int mnext_posh = CLAMP(0, (((int)nextpos.y))      / TILE_SIZE + starty, GAME_LEVEL_HEIGHT - 1);
+	int posy = 		 CLAMP(0, ((int)lstate->pos.y)    / TILE_SIZE + starty, GAME_LEVEL_HEIGHT - 1);
 
 	if (lstate->level[mnext_posy *  GAME_LEVEL_WIDTH + mnext_posx] == 1 ||
 		lstate->level[mnext_posh *  GAME_LEVEL_WIDTH + mnext_posx] == 1 ||
@@ -209,11 +210,11 @@ UPDATE_FUNC(game_update)
 	lstate->pos = nextpos;
 
 	if(lstate->level[posy * GAME_LEVEL_WIDTH + mnext_posw] == 2) {
-		if(lstate->pos.x > 1280)   { startx = 20; lstate->pos.x = 0.0f; }
-		else if(lstate->pos.x < 0) { startx = 0; lstate->pos.x = 1280.0f; }
+		if(lstate->pos.x > 1280)   { lstate->startx = 20; lstate->pos.x = 0.0f; }
+		else if(lstate->pos.x < 0) { lstate->startx = 0; lstate->pos.x = 1280.0f; }
 
-		if(lstate->pos.y > 720)     { starty = 11; lstate->pos.y = 0.0f; }
-		else if (lstate->pos.y < 0) { starty = 0;  lstate->pos.y = 720.0f; }
+		if(lstate->pos.y > 720)     { lstate->starty = 11; lstate->pos.y = 0.0f; }
+		else if (lstate->pos.y < 0) { lstate->starty = 0;  lstate->pos.y = 720.0f; }
 	}
 
 
@@ -249,7 +250,8 @@ UPDATE_FUNC(game_update)
 			Vec4 draw_rect = {__x, __y, (f32)TILE_SIZE, (f32)TILE_SIZE};
 
 			if(val == 0) {
-				draw_rectangle(m->sb, draw_rect, {((f32)x_osa + 20) / 255, ((f32)x_osa + 20) / 255, ((f32)x_osa + 180) / 255});
+				draw_rectangle(m->sb, draw_rect, {((f32)x_osa + 50) / 255, ((f32)x_osa + 100) / 255,
+							   ((f32)x_osa + 200) / 255});
 			} else if(val == 1) {
 				color = HV_RED;
 				draw_sprite(m->sb, draw_rect, Wall);
@@ -260,6 +262,7 @@ UPDATE_FUNC(game_update)
 		}
 	}
 
+	//draw_rectangle(m->sb, {0, 0, 10, 10}, HV_RED);
 
 	if(lstate->flip) {
 		draw_sprite_flip_x(m->sb, {lstate->pos.x, lstate->pos.y, 32, 32},

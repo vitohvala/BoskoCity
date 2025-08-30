@@ -124,9 +124,8 @@ struct GameState {
     usize animation_index;
     usize animate_index;
     u32 *level;
+    int startx, starty;
 };
-
-
 
 struct ButtonState {
     b32 ended_down;

@@ -1,23 +1,31 @@
 /*
-
+    TODO: audio
+          linux
 */
 
-#include "base.h"
 //#include "base.cpp"
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include "gl_renderer.h"
-#include "gl_renderer.cpp"
+
+#include "base.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+//#include "gl_renderer.h"
+//#include "gl_renderer.cpp"
 
 #include "game.h"
-#include "wglext.h"
+//#include "wglext.h"
 
 #include <d3d11_4.h>
 #include <dxgi.h>
 #include <dxgidebug.h>
 #include <d3dcompiler.h>
+
+#include <xaudio2.h>
+
 
 #pragma comment(lib, "dxguid")
 #pragma comment(lib, "d3d11.lib")
@@ -26,6 +34,8 @@
 
 
 #define SAFE_RELEASE(ptr) Statement( if(ptr) ptr->Release(); )
+#define HV_CREATE_WINDOW  (WM_USER + 0x0001)
+#define HV_DESTROY_WINDOW (WM_USER + 0x0002)
 
 
 /* ====================================================================
@@ -35,16 +45,27 @@
    ====================================================================*/
 global b32 running;
 global FILETIME shader_time;
+global DWORD main_thread_id;
 
-typedef BOOL (WINAPI * PFNWGLSWAPINTERVALEXTPROC)(int interval);
-    PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT;
-
+//typedef BOOL (WINAPI * PFNWGLSWAPINTERVALEXTPROC)(int interval);
+//    PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT;
+//
 
 /* ====================================================================
 
                                 STRUCTS
 
    ====================================================================*/
+
+
+struct Win32Sound {
+    WAVEFORMATEX wvf;
+    XAUDIO2_BUFFER buffer;
+    IXAudio2 *xaudio;
+    IXAudio2MasteringVoice *mvoice;
+    IXAudio2SourceVoice *srcvoice;
+    f32 volume;
+};
 
 struct Win32GameCode{
     HMODULE dll;
@@ -79,12 +100,24 @@ struct DxContext{
     ID3D11Buffer *constant_buffer;
 };
 
+struct Win32Window {
+    DWORD dwExStyle;
+    LPCWSTR lpClassName;
+    LPCWSTR lpWindowName;
+    DWORD dwStyle;
+    int X, Y;
+    int nWidth, nHeight;
+    HWND hWndParent;
+    HMENU hMenu;
+    HINSTANCE hInstance;
+    LPVOID lpParam;
+};
+
 /* ====================================================================
 
                              FUNC DECLARATIONS
 
    ====================================================================*/
-//this should be the only function declaration
 function LRESULT CALLBACK
 win32_main_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
@@ -95,11 +128,11 @@ win32_main_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
    ====================================================================*/
 
-void *platform_load_glfunc(char *func_name) {
-    void *proc = wglGetProcAddress(func_name);
-    hv_assert(proc != NULL);
-    return (void *)proc;
-}
+//void *platform_load_glfunc(char *func_name) {
+//    void *proc = wglGetProcAddress(func_name);
+//    hv_assert(proc != NULL);
+//    return (void *)proc;
+//}
 
 void platform_swap_buffers(void *hdc) {
     SwapBuffers((HDC)hdc);
@@ -139,9 +172,57 @@ win32_create_window(u32 width, u32 height, char *name)
 }
 
 
+HWND
+win32_create_bosko_window(u32 width, u32 height, char *name, HWND bosko_window)
+{
+    log_info("Create Window\n");
+    //remove HINSTANCE from func parametets?????
+    HMODULE hinstance = (HINSTANCE)GetModuleHandleW(NULL);
+    WNDCLASSEXW wca = {};
+    wca.cbSize = sizeof(wca);
+    wca.lpfnWndProc = win32_main_proc;
+    wca.hInstance = hinstance;
+    wca.lpszClassName = L"UntitledClass";
+    wca.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+    wca.hCursor = LoadCursor(0, IDC_ARROW);
+    wca.hIcon = LoadIcon(NULL, IDI_WINLOGO);
+
+    RECT rect = {0, 0, (LONG)width, (LONG)height};
+    AdjustWindowRect(&rect, WS_VISIBLE | WS_OVERLAPPEDWINDOW, FALSE);
+//
+    //HWND window_handle = CreateWindowExW(0, wca.lpszClassName, (LPCWSTR)name,
+    //                                 WS_OVERLAPPEDWINDOW,
+    //                                 CW_USEDEFAULT, CW_USEDEFAULT,
+    //                                 rect.right - rect.left, rect.bottom - rect.top,
+    //                         0, 0, hinstance, 0);
+//
+    RegisterClassExW(&wca);
+    Win32Window bosko = {};
+    bosko.dwExStyle = 0;
+    bosko.lpClassName = wca.lpszClassName;
+    bosko.lpWindowName = (LPCWSTR)name;
+    bosko.dwStyle = WS_OVERLAPPEDWINDOW;
+    bosko.X = CW_USEDEFAULT;
+    bosko.Y = CW_USEDEFAULT;
+    bosko.nWidth = rect.right - rect.left;
+    bosko.nHeight = rect.bottom - rect.top;
+    bosko.hInstance = wca.hInstance;
+
+    HWND window_handle = (HWND)SendMessageW(bosko_window, HV_CREATE_WINDOW, (WPARAM)&bosko, 0);
+
+
+    if(!window_handle) {
+        log_error("CreateWindowEx Failed\n");
+        running = false;
+    }
+
+    log_info("Window created\n");
+    return window_handle;
+}
+
 
 function void
-win32_pump_msg(GameInput *old_input, GameInput *new_input)
+win32_pump_msg(GameInput *old_input, GameInput *new_input, HWND tmp_window)
 {
     ControllerInput *new_keyboard = &new_input->cinput[HV_Keyboard];
     ControllerInput *old_keyboard = &old_input->cinput[HV_Keyboard];
@@ -197,6 +278,10 @@ win32_pump_msg(GameInput *old_input, GameInput *new_input)
             }
         } break;
 
+        case WM_CLOSE: {
+            SendMessageW(tmp_window, HV_DESTROY_WINDOW, msg.wParam, 0);
+        } break;
+
         default :
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
@@ -221,6 +306,7 @@ win32_get_perf_freq(void)
     return freq.QuadPart;
 }
 
+#ifdef false
 function HDC
 win32_gl_prepare(HWND window_handle, int major_v, int minor_v)
 {
@@ -319,6 +405,7 @@ win32_gl_prepare(HWND window_handle, int major_v, int minor_v)
 
     return dc;
 }
+#endif
 
 function HRESULT
 compile_shader(char *entrypoint, char *shader_model, ID3DBlob **blob_out)
@@ -633,16 +720,37 @@ win32_console_write(char *text, usize level)
     DWORD text_len = (DWORD)strlen(text);
 
     char *fstr[] =  { "[WARN]: ", "[INFO]: ", "[DEBUG]: ", "[TRACE]: " };
+    //u8 levels[] = {6, 2, 1, 8};
 
     DWORD number_written = 0;
+    //SetConsoleTextAttribute(h, levels[level]);
     WriteFile(h, fstr[level], (DWORD)strlen(fstr[level]), &number_written, 0);
 
     if (WriteFile(h, text, text_len, &number_written, 0) == 0) {
         LPVOID lpMsgBuf = format_err_msg(GetLastError());
-        puts((char *)lpMsgBuf);
+        //puts((char *)lpMsgBuf);
     }
 
     OutputDebugStringA(text);
+}
+
+function void
+win32_console_write2(char *text, usize level)
+{
+    //puts(text);
+    HANDLE h =  GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD text_len = (DWORD)strlen(text);
+    u8 levels[] = {6, 2, 1, 8};
+    char *fstr[] =  { "[WARN]: ", "[INFO]: ", "[DEBUG]: ", "[TRACE]: " };
+
+    SetConsoleTextAttribute(h, levels[level]);
+    DWORD number_written = 0;
+    WriteConsole(h, fstr[level], (DWORD)strlen(fstr[level]), &number_written, 0);
+    SetConsoleTextAttribute(h, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+
+    WriteConsole(h, text, text_len, &number_written, 0);
+
+    //OutputDebugStringA(text);
 }
 
 function void
@@ -703,6 +811,20 @@ win32_console_writef(usize level, char *fmt, ...)
 
     win32_console_write(buffer, level);
     OutputDebugStringA(buffer);
+}
+
+function void
+win32_console_writef2(usize level, char *fmt, ...)
+{
+    char buffer[2048];
+    va_list args;
+
+    va_start(args, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+
+    win32_console_write2(buffer, level);
+    //OutputDebugStringA(buffer);
 }
 
 
@@ -849,19 +971,110 @@ d3d_render(DxContext *d, SpriteBatch *sb, b32 vsync = true)
     d->swapchain->Present(vsync, {});
 }
 
-int WINAPI
-WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-        LPSTR lpCmdLine, int nCmdShow)
+function Win32Sound
+win32_xaudio_init(Arena *allocator)
 {
-    running = true;
-    AllocConsole();
+    Win32Sound result = {};
+    log_info("Initializing Xaudio2\n");
+
+    result.volume = 1.0f;
+
+    HRESULT res = S_OK;
+
+    res = CoInitializeEx(nil, COINIT_MULTITHREADED);
+    hv_assert(res == S_OK, "CoInitializeEx failed");
+
+    WAVEFORMATEX wv = {};
+    wv.wFormatTag = WAVE_FORMAT_PCM;
+    wv.nChannels = 2;
+    wv.nSamplesPerSec = 44100;
+    wv.wBitsPerSample =  16;
+    wv.nBlockAlign = wv.nChannels * 2;
+    wv.nAvgBytesPerSec = wv.nSamplesPerSec * wv.nBlockAlign;
+
+    res = XAudio2Create(&result.xaudio);
+    hv_assert(res == S_OK, "Xaudio2create failed");
+
+    res = result.xaudio->CreateMasteringVoice(&result.mvoice);
+    hv_assert(res == S_OK, "CreateMasteringVocie failed");
+
+    res = result.xaudio->CreateSourceVoice(&result.srcvoice, &wv);
+    hv_assert(res == S_OK, "CreateSourceVoice Failed");
+    res = result.srcvoice->SetVolume(result.volume);
+
+    //memcopy();
+    //check can set volume fail??
+    //hv_assert(res == S_OK, "SetVolume Failed");
+
+    return result;
+}
+
+function inline Console
+win32_console_init()
+{
+    //char bbbb[256];
 
     Console logger = {};
-    logger.writef = &win32_console_writef;
+    if(GetStdHandle(STD_OUTPUT_HANDLE) == NULL) {
+        AllocConsole();
+        logger.writef = &win32_console_writef2;
+    } else {
+        logger.writef = &win32_console_writef;
+    }
+
     logger.writef_error = &win32_writef_error;
     set_console(&logger);
 
-    HWND window_handle = win32_create_window(1280, 720, "Bosko City");
+    return logger;
+}
+
+static LRESULT CALLBACK
+win32_tmp_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    LRESULT result = 0;
+
+    switch (uMsg) {
+        case HV_CREATE_WINDOW: {
+            Win32Window *win_window = (Win32Window *)wParam;
+            result = (LRESULT)CreateWindowExW(win_window->dwExStyle, win_window->lpClassName,
+                                              win_window->lpWindowName, win_window->dwStyle,
+                                              win_window->X, win_window->Y,
+                                              win_window->nWidth, win_window->nHeight,
+                                              win_window->hWndParent, win_window->hMenu,
+                                              win_window->hInstance, win_window->lpParam);
+        } break;
+
+        case HV_DESTROY_WINDOW:
+        {
+            DestroyWindow((HWND)wParam);
+            running = false;
+        } break;
+
+        default:
+        {
+            result = DefWindowProcW(hwnd, uMsg, wParam, lParam);
+        } break;
+    }
+
+    return result;
+}
+
+
+
+function DWORD WINAPI
+hv_main(LPVOID param)
+{
+    HWND bosko_tmp_window = (HWND)param;
+    running = true;
+
+    #if defined(DEBUG_BUILD)
+        Console logger = win32_console_init();
+    #else
+        Console logger = {};
+    #endif
+
+    HWND window_handle = win32_create_bosko_window(1280, 720, "Bosko City", bosko_tmp_window);
+
 
     void *memory_buffer = VirtualAlloc((LPVOID)TB(2), GB(2),
                                        MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
@@ -887,13 +1100,8 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     DxContext d = d3d_init(window_handle);
     shader_time = win32_get_file_last_writetime("assets/shader.hlsl");
 
-    //HDC gl_dc = win32_gl_prepare(window_handle, 4, 5);
-    //gl_init(&temp_arena, (void*)gl_dc);
-    //gl_vport(1280, 720);
+    win32_xaudio_init(&permanent);
 
-    //disable vsync
-    //wglSwapIntervalEXT(0);
-    if(running) ShowWindow(window_handle, SW_SHOW);
 
     u64 pfreq = win32_get_perf_freq();
     u64 fcounter = win32_get_perf_counter();
@@ -902,7 +1110,12 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     GameInput input[2] = {};
     GameInput *old_input = &input[0];
-    GameInput *new_input = &input[1];
+    mem.input = &input[1];
+
+    if(running && window_handle) {
+        ShowWindow(window_handle, SW_SHOW);
+        SetForegroundWindow(window_handle);
+    }
 
     while(running) {
         if(win32_hot_reload(&game, &gamepath)) {
@@ -910,25 +1123,18 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         }
         win32_hot_reload_shader(&d);
 
-        win32_pump_msg(old_input, new_input);
-        mem.input = new_input;
-
-        SpriteBatch sb = {};
-        sb.count = 0;
-        sb.sprite = (Sprite*)arena_alloc(&transient, MAX_SPRITES * sizeof(Sprite));
-
-        mem.sb = &sb;
+        win32_pump_msg(old_input, mem.input, bosko_tmp_window);
 
         if(game.update) game.update(&mem);
 
-        d3d_render(&d, &sb);
+        d3d_render(&d, mem.sb);
 
         u64 ecounter = win32_get_perf_counter();
         dt = ((f32)ecounter - (f32)fcounter) / (f32)pfreq;
         fcounter = ecounter;
         mem.dt = dt;
 
-        hv_swap(GameInput* , new_input, old_input);
+        hv_swap(GameInput* , mem.input, old_input);
 
         arena_reset(&transient);
         arena_reset(&temp_arena);
@@ -941,7 +1147,44 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     d3d_free(&d);
     VirtualFree(memory_buffer, 0, MEM_RELEASE);
-    return 0;
+    ExitProcess(0);
+}
+
+int WINAPI
+WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
+        LPSTR lpCmdLine, int nCmdShow)
+{
+    WNDCLASSEXW wca = {};
+    wca.cbSize = sizeof(wca);
+    wca.lpfnWndProc = &win32_tmp_proc;
+    wca.hInstance = GetModuleHandleW(NULL);
+    wca.hIcon = LoadIconA(NULL, IDI_APPLICATION);
+    wca.hCursor = LoadCursorA(NULL, IDC_ARROW);
+    wca.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wca.lpszClassName = L"Untitled";
+    RegisterClassExW(&wca);
+
+    HWND service_window = CreateWindowExW(nil, wca.lpszClassName, L"tmp_BOSKO",
+                                          WS_OVERLAPPEDWINDOW,
+                                          CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                                          0, 0, hInstance, 0);
+
+    CreateThread(0, 0, hv_main, service_window, 0, &main_thread_id);
+
+    while(1) {
+        MSG msg;
+        GetMessageW(&msg, 0, 0, 0);
+        TranslateMessage(&msg);
+        if((msg.message == WM_CHAR) || (msg.message == WM_KEYDOWN) || (msg.message == WM_KEYUP) ||
+           (msg.message == WM_QUIT) || (msg.message == WM_SIZE) || msg.message == WM_SETFOCUS ||
+            msg.message == WM_KILLFOCUS || msg.message == WM_SYSCHAR || msg.message ==  WM_SYSKEYDOWN  ||
+            msg.message == WM_SYSKEYUP )
+        {
+            PostThreadMessageW(main_thread_id, msg.message, msg.wParam, msg.lParam);
+        } else {
+            DispatchMessageW(&msg);
+        }
+    }
 }
 
 function LRESULT CALLBACK
@@ -949,7 +1192,8 @@ win32_main_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     LRESULT result = 0;
     switch(uMsg) {
         case WM_CLOSE: {
-            running = false;
+            PostThreadMessageW(main_thread_id, uMsg, (WPARAM)hwnd, lParam);
+            //running = false;
         } break;
 
         case WM_ERASEBKGND: return 1;
@@ -958,41 +1202,31 @@ win32_main_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
             PostQuitMessage(0);
             return 0;
 
-        case WM_SIZE: {
-            // Get the updated size.
-            RECT r;
-            GetClientRect(hwnd, &r);
-            u32 width = r.right - r.left;
-            u32 height = r.bottom - r.top;
+        //case WM_SIZE: {
+        //    // Get the updated size.
+        //    RECT r;
+        //    GetClientRect(hwnd, &r);
+        //    u32 width = r.right - r.left;
+        //    u32 height = r.bottom - r.top;
 
 
-        } break;
+        //} break;
 
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
         case WM_KEYUP:
-        case WM_SYSKEYUP: {
-            // Key pressed/released
-            //b8 pressed = (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);
-            // TODO: input processing
-
-        } break;
-
-        case WM_MOUSEMOVE: {
+        case WM_SYSKEYUP:
+        case WM_MOUSEMOVE:
             // Mouse move
             //i32 x_position = GET_X_LPARAM(l_param);
             //i32 y_position = GET_Y_LPARAM(l_param);
-            // TODO: input processing.
-        } break;
-
         case WM_LBUTTONDOWN:
         case WM_MBUTTONDOWN:
         case WM_RBUTTONDOWN:
         case WM_LBUTTONUP:
         case WM_MBUTTONUP:
         case WM_RBUTTONUP: {
-            //b8 pressed = msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN;
-            // TODO: input processing.
+            PostThreadMessageW(main_thread_id, uMsg, (WPARAM)hwnd, lParam);
         } break;
 
         default : {

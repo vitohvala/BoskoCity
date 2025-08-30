@@ -231,7 +231,7 @@ function inline b32
 operator==(Vec3 l, Vec3 r)
 {
     //TODO use compare function inline
-    return (l.x == r.x && l.y == r.y, l.z == r.z);
+    return (l.x == r.x && l.y == r.y && l.z == r.z);
 }
 function inline b32
 operator!=(Vec3 l, Vec3 r)
@@ -665,12 +665,12 @@ vsnprintf(char *buf, int count, char const *fmt, va_list va)
 
 global Console console;
 
-#define log_warn(...)  Statement( console.writef(0, __VA_ARGS__);)
-#define log_info(...)  Statement( console.writef(1, __VA_ARGS__);)
-#define log_debug(...) Statement( console.writef(2, __VA_ARGS__);)
-#define log_trace(...) Statement( console.writef(3, __VA_ARGS__);)
-#define log_error(...) Statement( console.writef_error(__VA_ARGS__); )
-#define fatal(...)     Statement( console.writef_error(__VA_ARGS__); )
+#define log_warn(...)  Statement( if(console.writef) { console.writef(0, __VA_ARGS__); } )
+#define log_info(...)  Statement( if(console.writef) { console.writef(1, __VA_ARGS__); } )
+#define log_debug(...) Statement( if(console.writef) { console.writef(2, __VA_ARGS__); } )
+#define log_trace(...) Statement( if(console.writef) { console.writef(3, __VA_ARGS__); } )
+#define log_error(...) Statement( if(console.writef_error) { console.writef_error(__VA_ARGS__);  } )
+#define fatal(...)     Statement( if(console.writef_error) { console.writef_error(__VA_ARGS__);  } )
 
 function void
 set_console(Console *c)
@@ -679,7 +679,7 @@ set_console(Console *c)
 }
 
 function inline
-void hv_assert(b32 assertion, char *fmt = '\0', ...) {
+void hv_assert(b32 assertion, char *fmt = nil, ...) {
     #ifdef OS_GRAPHICAL
     if (!assertion) {
         if(fmt) {
@@ -692,7 +692,7 @@ void hv_assert(b32 assertion, char *fmt = '\0', ...) {
 
             log_error(buffer);
         } else {
-            log_error("Assertion");
+            log_error("Assertion:  \n");
         }
     }
     #else
