@@ -534,7 +534,7 @@ d3d_init(HWND handle) {
         swd.SampleDesc.Count = 1;
         swd.SampleDesc.Quality = 0;
         swd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        swd.BufferCount = 2;
+        swd.BufferCount = 1;
         swd.Scaling     = DXGI_SCALING_STRETCH;
         swd.SwapEffect  = DXGI_SWAP_EFFECT_DISCARD;
         swd.AlphaMode   = DXGI_ALPHA_MODE_UNSPECIFIED;
@@ -672,7 +672,7 @@ d3d_init(HWND handle) {
         res = d3d.device->CreateSamplerState(&sampler_desc, &d3d.sampler);
         hv_assert(SUCCEEDED(res), "Create sampler state failed");
 
-        float constantData[4] = { d3d.viewport.Width,d3d.viewport.Height, (f32)twidth, (f32)theight };
+        float constantData[4] = { d3d.viewport.Width, d3d.viewport.Height, (f32)twidth, (f32)theight };
 
         D3D11_BUFFER_DESC constant_buffer_desc = {};
         constant_buffer_desc.ByteWidth = sizeof(constantData) + 0xf & 0xfffffff0;
