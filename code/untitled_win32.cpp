@@ -46,7 +46,7 @@
 global b32 running;
 global FILETIME shader_time;
 global DWORD main_thread_id;
-
+global b32 alloc_console = false;
 //typedef BOOL (WINAPI * PFNWGLSWAPINTERVALEXTPROC)(int interval);
 //    PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT;
 //
@@ -120,7 +120,6 @@ struct Win32Window {
    ====================================================================*/
 function LRESULT CALLBACK
 win32_main_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-
 
 /* ====================================================================
 
@@ -270,6 +269,9 @@ win32_pump_msg(GameInput *old_input, GameInput *new_input, HWND tmp_window)
                     } break;
                     case 'K' : {
                         process_keyboard_message(&new_keyboard->action_down, is_down);
+                    } break;
+                    case 'H' : {
+                        process_keyboard_message(&new_keyboard->action_left, is_down);
                     } break;
                     case 'R' : {
                         process_keyboard_message(&new_keyboard->start, is_down);
@@ -534,9 +536,9 @@ d3d_init(HWND handle) {
         swd.SampleDesc.Count = 1;
         swd.SampleDesc.Quality = 0;
         swd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        swd.BufferCount = 1;
+        swd.BufferCount = 2;
         swd.Scaling     = DXGI_SCALING_STRETCH;
-        swd.SwapEffect  = DXGI_SWAP_EFFECT_DISCARD;
+        swd.SwapEffect  = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         swd.AlphaMode   = DXGI_ALPHA_MODE_UNSPECIFIED;
         swd.Flags       = 0;
 
@@ -597,28 +599,29 @@ d3d_init(HWND handle) {
 
         ps_blob->Release();
 
+        D3D11_RECT scissor_rect;
+        scissor_rect.left = (LONG)d3d.viewport.TopLeftX;
+        scissor_rect.top = (LONG)d3d.viewport.TopLeftY;
+        scissor_rect.right = (LONG)(d3d.viewport.TopLeftX + d3d.viewport.Width);
+        scissor_rect.bottom = (LONG)(d3d.viewport.TopLeftY + d3d.viewport.Height);
+
+        d3d.dcontext->RSSetScissorRects(1, &scissor_rect);
+
         D3D11_RASTERIZER_DESC rdesc = {};
         rdesc.FillMode = D3D11_FILL_SOLID;
         rdesc.CullMode = D3D11_CULL_NONE;
         rdesc.FrontCounterClockwise = false;
         rdesc.DepthClipEnable = true;
-        rdesc.MultisampleEnable = true;
-        rdesc.AntialiasedLineEnable = true;
-        rdesc.ScissorEnable = false;
+        rdesc.MultisampleEnable = false;
+        rdesc.AntialiasedLineEnable = false;
+        rdesc.ScissorEnable = true;
 
         res = d3d.device->CreateRasterizerState(&rdesc, &d3d.rstate);
         hv_assert(SUCCEEDED(res), "CreateRasterizerState failed");
 
         /*
-                might be useful
-                D3D11_RECT scissor_rect;
-                scissor_rect.left = (LONG)vp.TopLeftX;
-                scissor_rect.top = (LONG)vp.TopLeftY;
-                scissor_rect.right = (LONG)(vp.TopLeftX + vp.Width);
-                scissor_rect.bottom = (LONG)(vp.TopLeftY + vp.Height);
+                might be useful */
 
-                d3.context->RSSetScissorRects(1, &scissor_rect);
-        */
 
         int twidth = 0, theight = 0, nr_channels = 0;
         u8 *image_data = (u8*)stbi_load("assets/atlas.png", &twidth, &theight, &nr_channels, 4);
@@ -671,6 +674,8 @@ d3d_init(HWND handle) {
 
         res = d3d.device->CreateSamplerState(&sampler_desc, &d3d.sampler);
         hv_assert(SUCCEEDED(res), "Create sampler state failed");
+
+
 
         float constantData[4] = { d3d.viewport.Width, d3d.viewport.Height, (f32)twidth, (f32)theight };
 
@@ -954,6 +959,8 @@ d3d_render(DxContext *d, SpriteBatch *sb, b32 vsync = true)
     }
     d->dcontext->Unmap(d->sprite_buffer, 0);
 
+    d->dcontext->OMSetRenderTargets(1, &d->framebuffer_rtv, nullptr);
+
     d->dcontext->ClearRenderTargetView(d->framebuffer_rtv, (f32[]){0.0f, 0.0f, 0.0f, 1.0f});
 
     d->dcontext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -1015,7 +1022,7 @@ win32_console_init()
     //char bbbb[256];
 
     Console logger = {};
-    if(GetStdHandle(STD_OUTPUT_HANDLE) == NULL) {
+    if(alloc_console) {
         AllocConsole();
         logger.writef = &win32_console_writef2;
     } else {
@@ -1168,6 +1175,10 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                                           WS_OVERLAPPEDWINDOW,
                                           CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
                                           0, 0, hInstance, 0);
+
+    if(GetStdHandle(STD_OUTPUT_HANDLE) == NULL) {
+        alloc_console = true;
+    }
 
     CreateThread(0, 0, hv_main, service_window, 0, &main_thread_id);
 
