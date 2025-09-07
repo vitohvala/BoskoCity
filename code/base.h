@@ -339,4 +339,6 @@ extern "C" {
 
 #define hv_swap(T, a, b) Statement(T __t = a; a = b; b = __t;)
 
+#define make(T, arena_pointer, size) (T*)arena_alloc(arena_pointer, sizeof(T) * size);
+
 #include "base.cpp"

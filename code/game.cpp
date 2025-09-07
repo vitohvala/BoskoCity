@@ -38,7 +38,7 @@ draw_text(SpriteBatch *sb, Vec2 pos, String8 text, Vec3 color = vec3(1.0f))
 
 		//fnt = glyphs[letter - 32];
 
-		for(int j = 0; j < array_len(atlas_glyphs); j++) {
+		for(int j = 0; j < (int)array_len(atlas_glyphs); j++) {
 			if(atlas_glyphs[j].value == letter) {
 				fnt = atlas_glyphs[j];
 				break;
