@@ -798,7 +798,7 @@ win32_writef_error(char *fmt, ...)
     va_list args;
 
     va_start(args, fmt);
-    stbsp_vsnprintf(buffer, sizeof(buffer), fmt, args);
+    hv_vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
     win32_write_error(buffer);

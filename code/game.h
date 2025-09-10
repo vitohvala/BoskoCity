@@ -8,7 +8,7 @@
 #define HV_GREEN (Vec3){0.0f, 1.0f, 0.0f}
 #define HV_BLACK (Vec3){0.0f, 0.0f, 0.0f}
 
-#ifdef OS_LINUX
+#if OS_LINUX
 struct alignas(16) Sprite {
     Vec2 pos;
     Vec2 size;
@@ -64,10 +64,10 @@ struct ControllerInput {
             ButtonState action_down;
             ButtonState action_left;
             ButtonState action_right;
-            
+
             ButtonState start;
             ButtonState back;
-            
+
             ButtonState l1trigger;
             ButtonState r1trigger;
             ButtonState l2trigger;
@@ -86,10 +86,10 @@ struct Memory {
     Arena *temp;
     Arena *transient;
     Arena *permanent;
-    
+
     Console *log;
     SpriteBatch *sb;
-    
+
     GameState *state;
     GameInput *input;
     \
