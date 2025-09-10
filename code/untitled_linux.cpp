@@ -32,6 +32,8 @@ typedef void (APIENTRYP PFNGLDRAWARRAYSPROC)(GLenum mode, GLint first, GLsizei c
 struct GLContext {
     GLuint program_id;
     uint vao;
+    uint vshader;
+    uint fshader;
     u32 screen_size_uloc;
     u32 sprite_id;
 };
@@ -55,6 +57,11 @@ struct LinuxGameCode {
     void *dll;
     struct stat last_write;
     UpdateP *update;
+};
+
+struct OpenGLShaderCode {
+    struct stat last_vshader;
+    struct stat last_fshader;
 };
 
 typedef GLXContext (*glXCreateContextAttribsARBProc)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
@@ -431,6 +438,10 @@ gl_init(Arena *temp, FullPath *shader_paths, String8 *exe_dir)
     
     glAttachShader(gl_context.program_id, vshader);
     glAttachShader(gl_context.program_id, fshader);
+    
+    gl_context.vshader = vshader;
+    gl_context.fshader = fshader;
+    
     glLinkProgram(gl_context.program_id);
     
     glGetProgramiv(gl_context.program_id, GL_LINK_STATUS, &success);
@@ -439,8 +450,10 @@ gl_init(Arena *temp, FullPath *shader_paths, String8 *exe_dir)
         log_error("Shader program link failed %s", infoLog);
     }
     
-    glDeleteShader(vshader);
-    glDeleteShader(fshader);
+    //glDeleteShader(vshader);
+    //glDetachShader(gl_context.program_id, vshader);
+    //glDeleteShader(fshader);
+    //glDetachShader(gl_context.program_id, fshader);
     
     //uint vbo;
     glGenVertexArrays(1, &gl_context.vao);
@@ -545,11 +558,88 @@ linux_hot_reload(FullPath *gamepath, LinuxGameCode *game)
 }
 
 function void 
-linux_hot_reload_shaders(void)
+linux_hot_reload_shaders(Arena *arena, FullPath *fpath, String8 *exe_dir, OpenGLShaderCode *scode)
 {
+    // TODO(vitalis): CLEANUP!!!!!!!!!!
+    struct stat tmp_shader_stat = {};
+    stat(fpath->vshader_path, &tmp_shader_stat);
     
+    uint fshader = glCreateShader(GL_FRAGMENT_SHADER);
+    uint vshader = glCreateShader(GL_VERTEX_SHADER);
+    
+    int success = 0;
+    char info_log[512] = {};
+    
+    if(tmp_shader_stat.st_mtim.tv_sec != scode->last_vshader.st_mtim.tv_sec) {
+        char *vshader_src = linux_load_shader(arena, fpath->vshader_path);
+        scode->last_vshader = tmp_shader_stat;
+        
+        glShaderSource(vshader, 1, &vshader_src, nil);
+        glCompileShader(vshader);
+        
+        glGetShaderiv(vshader, GL_COMPILE_STATUS, &success);
+        if(!success) {
+            glGetShaderInfoLog(vshader, 512, nil, info_log);
+            log_warn("Shader compilation failed %s", info_log);
+            log_warn("Using old shader");
+            glDeleteShader(vshader);
+        } else {
+            glDetachShader(gl_context.program_id, gl_context.vshader);
+            glAttachShader(gl_context.program_id, vshader);
+            log_info("Vertex Shader reloaded");
+            
+            glLinkProgram(gl_context.program_id);
+            
+            glGetProgramiv(gl_context.program_id, GL_LINK_STATUS, &success);
+            if(!success) {
+                glGetProgramInfoLog(gl_context.program_id, 512, nil, info_log);
+                log_warn("Program linking failed: %s", info_log);
+                log_warn("Rolling back to old shaders");
+                glAttachShader(gl_context.program_id, gl_context.vshader);
+                glDetachShader(gl_context.program_id, vshader);
+                glLinkProgram(gl_context.program_id);
+            } else {
+                gl_context.vshader = vshader;
+            }
+        }
+    }
+    
+    stat(fpath->fshader_path, &tmp_shader_stat);
+    
+    if(tmp_shader_stat.st_mtim.tv_sec != scode->last_fshader.st_mtim.tv_sec) {
+        char *fshader_src = linux_load_shader(arena, fpath->fshader_path);
+        scode->last_fshader = tmp_shader_stat;
+        
+        glShaderSource(fshader, 1, &fshader_src, nil);
+        glCompileShader(fshader);
+        
+        glGetShaderiv(fshader, GL_COMPILE_STATUS, &success);
+        if(!success) {
+            glGetShaderInfoLog(fshader, 512, nil, info_log);
+            log_warn("Shader compilation failed %s", info_log);
+            log_warn("Using old shader");
+            glDeleteShader(fshader);
+        } else {
+            glDetachShader(gl_context.program_id, gl_context.fshader);
+            glAttachShader(gl_context.program_id, fshader);
+            log_info("Fragment shader reloaded");
+            
+            glLinkProgram(gl_context.program_id);
+            
+            glGetProgramiv(gl_context.program_id, GL_LINK_STATUS, &success);
+            if(!success) {
+                glGetProgramInfoLog(gl_context.program_id, 512, nil, info_log);
+                log_warn("Program linking failed: %s", info_log);
+                log_warn("Rolling back to old shaders");
+                glAttachShader(gl_context.program_id, gl_context.fshader);
+                glDetachShader(gl_context.program_id, fshader);
+                glLinkProgram(gl_context.program_id);
+            } else {
+                gl_context.fshader = fshader;
+            }
+        }
+    }
 }
-
 function void 
 gl_render(X11Window *bosko, SpriteBatch *sb)
 {
@@ -690,6 +780,10 @@ int main(void){
     String8 exe_dir = linux_find_exe_dir(&permanent);
     FullPath gamecode_path = linux_find_fullpath(&exe_dir, "game.so", "game_temp.so");
     FullPath shaders_path = linux_find_fullpath(&exe_dir, "assets/vertex.glsl", "assets/frag.glsl");
+    OpenGLShaderCode shader_code = {};
+    
+    stat(shaders_path.vshader_path, &shader_code.last_vshader);
+    stat(shaders_path.fshader_path, &shader_code.last_fshader);
     
     X11Window bosko = linux_create_window(1280, 720, "BoskoCity"); 
     
@@ -722,7 +816,7 @@ int main(void){
             game_mem.is_init = 2;
             //game.update = 0;
         }
-        linux_hot_reload_shaders();
+        linux_hot_reload_shaders(&temp_arena, &shaders_path, &exe_dir, &shader_code);
         
         linux_pump_msg(&bosko, game_mem.input, old_input);
         
