@@ -1,58 +1,22 @@
 #pragma once
 
-#define STB_SPRINTF_IMPLEMENTATION
-#include "stb_sprintf.h"
-
 #if defined __clang__
 #define COMPILER_CLANG 1
 // clang is defining _MSC_VER
-#if defined __linux__
-#define OS_LINUX 1
-#elif defined __APPLE__
-#define OS_MAC 1
-#elif defined _WIN32
-#define OS_WINDOWS 1
-#else
-#error missing OS detection
-#endif
 
 #elif defined _MSC_VER
 #define COMPILER_CL 1
 
-#if defined _WIN32
-#define OS_WINDOWS 1
-#else
-#error missing OS detection
-#endif
-
 #elif defined __GNUC__
 #define COMPILER_GCC 1
-
-#if defined __linux__
-#define OS_LINUX 1
-#elif defined __APPLE__
-#define OS_MAC 1
-#elif defined _WIN32
-#define OS_WINDOWS 1
-#else
-#error missing OS detection
-#endif
 
 #elif defined __MINGW32__
 #define COMPILER_MINGW32 1
 
-#if defined __linux__
-#define OS_LINUX 1
-#elif defined __APPLE__
-#define OS_MAC 1
-#elif defined _WIN32
-#define OS_WINDOWS 1
-#else
-#error missing OS detection
-#endif
-
 #elif defined __MINGW64__
 #define COMPILER_MINGW64 1
+#endif
+
 
 #if defined __linux__
 #define OS_LINUX 1
@@ -62,8 +26,6 @@
 #define OS_WINDOWS 1
 #else
 #error missing OS detection
-#endif
-
 #endif
 
 #if !defined COMPILER_CL
@@ -115,6 +77,9 @@
 #define CLAMP(A, X, B) (((X) < (A)) ? (A) : ((X) > (B)) ? (B) : (X))
 
 #include <stdint.h>
+#if COMPILER_CLANG || COMPILER_GCC 
+#include <stddef.h>
+#endif
 
 typedef uint64_t u64;
 typedef uint32_t u32;
@@ -156,17 +121,17 @@ typedef u32     b32;
 #define Statement(x) do { x } while(0)
 
 #ifdef DEBUG_BUILD
-    #if defined COMPILER_CL
-        #define Trap __debugbreak()
-    #elif COMPILER_GCC || COMPILER_CLANG
-        #define Trap __builtin_trap()
-    #else
-        #define Trap Statement( if(!(x)) { *(int*) 0 = 0; } )
-    #endif
-
-    #define Assert(expr) Statement( if(!(expr)) { Trap; })
+#if COMPILER_CL
+#define Trap __debugbreak()
+#elif COMPILER_GCC || COMPILER_CLANG
+#define Trap __builtin_trap()
 #else
-    #define Assert(x) (void)(x)
+#define Trap Statement( if(!(x)) { *(int*) 0 = 0; } )
+#endif
+
+#define Assert(expr) Statement( if(!(expr)) { Trap; })
+#else
+#define Assert(x) (void)(x)
 #endif
 
 union Vec2{
@@ -269,7 +234,7 @@ function f32 v3_length(Vec3 v);
 struct String8 {
     u8 *data;
     usize len;
-
+    
     u8& operator[](usize index) {
         Assert(len > index);
         return data[index];
@@ -279,7 +244,7 @@ struct String8 {
 struct String16 {
     u16 *data;
     usize len;
-
+    
     u16& operator[](usize index) {
         Assert(len > index);
         return data[index];
@@ -289,7 +254,7 @@ struct String16 {
 struct String32 {
     u32 *data;
     usize len;
-
+    
     u32& operator[](usize index) {
         Assert(len > index);
         return data[index];
@@ -340,5 +305,15 @@ extern "C" {
 #define hv_swap(T, a, b) Statement(T __t = a; a = b; b = __t;)
 
 #define make(T, arena_pointer, size) (T*)arena_alloc(arena_pointer, sizeof(T) * size);
+
+#define STB_SPRINTF_STATIC
+#define STB_SPRINTF_DECORATE(name) hv_##name
+#define STB_SPRINTF_IMPLEMENTATION
+#include "stb_sprintf.h"
+
+#define MS_PER_SECOND   1000
+#define US_PER_SECOND   1000000
+#define NS_PER_SECOND   1000000000LL
+
 
 #include "base.cpp"

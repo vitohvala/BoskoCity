@@ -8,14 +8,21 @@
 #define HV_GREEN (Vec3){0.0f, 1.0f, 0.0f}
 #define HV_BLACK (Vec3){0.0f, 0.0f, 0.0f}
 
-
-
-struct Sprite {
+#ifdef OS_LINUX
+struct alignas(16) Sprite {
     Vec2 pos;
     Vec2 size;
     Vec2 aoffset, asize;
     Vec3 color;
 };
+#else
+struct  Sprite {
+    Vec2 pos;
+    Vec2 size;
+    Vec2 aoffset, asize;
+    Vec3 color;
+};
+#endif
 
 #define MAX_SPRITES 8192
 
@@ -29,11 +36,6 @@ struct GameState {
     b32 grounded;
     Vec2 pos;
     Vec2 vel;
-};
-
-struct Rect {
-	f32 x, y;
-	f32 w, h;
 };
 
 struct ButtonState {
@@ -62,10 +64,10 @@ struct ControllerInput {
             ButtonState action_down;
             ButtonState action_left;
             ButtonState action_right;
-
+            
             ButtonState start;
             ButtonState back;
-
+            
             ButtonState l1trigger;
             ButtonState r1trigger;
             ButtonState l2trigger;
@@ -84,13 +86,13 @@ struct Memory {
     Arena *temp;
     Arena *transient;
     Arena *permanent;
-
+    
     Console *log;
     SpriteBatch *sb;
-
+    
     GameState *state;
     GameInput *input;
-\
+    \
     f32 dt;
 };
 
@@ -99,6 +101,10 @@ struct Memory {
 
 #define UPDATE_FUNC(name) void name(Memory *m)
 typedef UPDATE_FUNC(UpdateP);
+
+extern "C" {
+    UPDATE_FUNC(game_update);
+}
 
 #define ATLAS_WIDTH  506
 #define ATLAS_HEIHT  73
@@ -112,7 +118,7 @@ enum TextureName {
 };
 
 struct AtlasTexture {
-	Rect rect;
+	Vec4 rect;
 	// These offsets tell you how much space there is between the rect and the edge of the original document.
 	// The atlas is tightly packed, so empty pixels are removed. This can be especially apparent in animations where
 	// frames can have different offsets due to different amount of empty pixels around the frames.
@@ -126,7 +132,7 @@ struct AtlasTexture {
 	f32  duration;
 };
 
-AtlasTexture atlas_textures[] = {
+const AtlasTexture atlas_textures[] = {
 	{},
 	{ {389.f, 54.f, 16.f, 16.f}, 0.f, 112.f, 112.f, 0.f, {128.f, 128.f}, 0.100f},
 };
@@ -157,14 +163,14 @@ AtlasAnimation atlas_animations[] = {
 };
 
 struct AtlasGlyph {
-	Rect rect;
+	Vec4 rect;
 	u8 value;
 	int offset_x;
 	int offset_y;
 	int advance_x;
 };
 
-AtlasGlyph atlas_glyphs[] = {
+const AtlasGlyph atlas_glyphs[] = {
 	{{435.f, 28.f, 18.f, 25.f}, 'A', 0, 0, 24},
 	{{295.f, 28.f, 18.f, 25.f}, 'B', 0, 0, 24},
 	{{235.f, 28.f, 18.f, 25.f}, 'C', 0, 0, 24},
@@ -245,8 +251,8 @@ AtlasGlyph atlas_glyphs[] = {
 function b32
 was_pressed(ButtonState *state) {
 	b32 result = ((state->htransition_count > 1) ||
-	             ((state->htransition_count == 1) &&
-	             ( state->ended_down)));
+                  ((state->htransition_count == 1) &&
+                   ( state->ended_down)));
 	return result;
 }
 

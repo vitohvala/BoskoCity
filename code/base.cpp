@@ -316,11 +316,11 @@ v3_normalize(Vec3 v)
 {
     Vec3 v1 = {};
     //Assert(v3_length(v) > 0);
-
+    
     v1 = v;
-
+    
     f32 l = v3_length(v1);
-
+    
     if(l != 0.0f && l != 1.0f) {
         f32 ilen = 1.0f / f32_sqrt(l);
         v1 *= ilen;
@@ -392,7 +392,7 @@ operator+(Mat4 x, Mat4 y)
     result.m1 = x.m1 + y.m1;
     result.m2 = x.m2 + y.m2;
     result.m3 = x.m3 + y.m3;
-
+    
     return result;
 }
 
@@ -410,20 +410,20 @@ function inline Mat4
 operator*(Mat4 l, Vec3 scale)
 {
     Mat4 result = l;
-
+    
     result.m0.x *= scale.x;
     //result.m0.y *= scale.x;
     //result.m0.z *= scale.x;
-
+    
     //result.m1.x *= scale.y;
     result.m1.y *= scale.y;
     //result.m1.z *= scale.y;
-
+    
     //result.m2.x *= scale.z;
     //result.m2.y *= scale.z;
     result.m2.z *= scale.z;
-
-
+    
+    
     result.m3.w = 1.0f;
     return result;
 }
@@ -432,14 +432,14 @@ function inline Mat4
 operator*(Mat4 l, Mat4 r)
 {
     Mat4 result;
-
+    
     for (int i = 0; i < 4; i++) {
         result.m[i].x = l.m[i].x * r.m[0].x + l.m[i].y * r.m[1].x + l.m[i].z * r.m[2].x + l.m[i].w * r.m[3].x;
         result.m[i].y = l.m[i].x * r.m[0].y + l.m[i].y * r.m[1].y + l.m[i].z * r.m[2].y + l.m[i].w * r.m[3].y;
         result.m[i].z = l.m[i].x * r.m[0].z + l.m[i].y * r.m[1].z + l.m[i].z * r.m[2].z + l.m[i].w * r.m[3].z;
         result.m[i].w = l.m[i].x * r.m[0].w + l.m[i].y * r.m[1].w + l.m[i].z * r.m[2].w + l.m[i].w * r.m[3].w;
     }
-
+    
     return result;
 }
 /*
@@ -490,7 +490,7 @@ mat4(f32 x)
     m.m1.y = 1.0f;
     m.m2.z = 1.0f;
     m.m3.w = 1.0f;
-
+    
     return m;
 }
 
@@ -499,28 +499,28 @@ m4_rotate(Mat4 mat, Vec3 v, f32 angle_radians)
 {
     f32 c = f32_cos(angle_radians);
     f32 s = f32_sin(angle_radians);
-
+    
     Mat4 rot = mat;
-
+    
     Vec3 axis = v3_normalize(v);
-
+    
     f32 x = axis.x, y = axis.y, z = axis.z;
-
+    
     f32 t = 1.0f - c;
-
+    
     rot.m0.x = x*x*t + c;
     rot.m0.y = y*x*t + z*s;    // swapped
     rot.m0.z = z*x*t - y*s;    // swapped
-
+    
     rot.m1.x = x*y*t - z*s;    // swapped
     rot.m1.y = y*y*t + c;
     rot.m1.z = z*y*t + x*s;    // swapped
-
+    
     rot.m2.x = x*z*t + y*s;    // swapped
     rot.m2.y = y*z*t - x*s;    // swapped
     rot.m2.z = z*z*t + c;
     rot.m3.w = 1.0f;
-
+    
 	return (rot);
 }
 
@@ -600,14 +600,14 @@ function inline uptr
 align_forward(uptr ptr, usize align)
 {
 	uptr p, a, modulo;
-
+    
 	Assert(is_power_of_two(align));
-
+    
 	p = ptr;
 	a = (uptr)align;
 	// Same as (p % a) but faster as 'a' is a power of two
 	modulo = p & (a-1);
-
+    
 	if (modulo != 0) {
 		// If 'p' address is not aligned, push the address to the
 		// next value which is aligned
@@ -623,13 +623,13 @@ function  void
 	uptr curr_ptr = (uptr)a->buffer + (uptr)a->curr_offset;
 	uptr offset = align_forward(curr_ptr, align);
 	offset -= (uptr)a->buffer; // Change to relative offset
-
+    
 	// Check to see if the backing memory has space left
 	if (offset+size <= a->cap) {
 		void *ptr = &a->buffer[offset];
 		a->prev_offset = offset;
 		a->curr_offset = offset+size;
-
+        
 		// Zero new memory by default
 		memset(ptr, 0, size);
 		return ptr;
@@ -646,7 +646,7 @@ arena_init(void *buffer, usize cap)
     a.cap = cap;
     a.curr_offset = 0;
     a.prev_offset = 0;
-
+    
     return a;
 }
 
@@ -655,13 +655,6 @@ arena_reset(Arena *arena)
 {
     arena->curr_offset = arena->prev_offset = 0;
 }
-
-function int
-vsnprintf(char *buf, int count, char const *fmt, va_list va)
-{
-    return stbsp_vsnprintf(buf, count, fmt, va);
-}
-
 
 global Console console;
 
@@ -680,24 +673,21 @@ set_console(Console *c)
 
 function inline
 void hv_assert(b32 assertion, char *fmt = nil, ...) {
-    #ifdef OS_GRAPHICAL
     if (!assertion) {
         if(fmt) {
             char buffer[2048];
             va_list args;
-
+            
             va_start(args, fmt);
-            vsnprintf(buffer, sizeof(buffer), fmt, args);
+            hv_vsnprintf(buffer, sizeof(buffer), fmt, args);
             va_end(args);
-
+            
             log_error(buffer);
         } else {
-            log_error("Assertion:  \n");
+            log_error("Assertion:  ");
         }
     }
-    #else
-    Assert(assertion);
-    #endif
+    //    Assert(assertion);
 }
 
 function usize
@@ -714,7 +704,7 @@ function String8
 str8(Arena *a, char *text)
 {
     String8 result;
-
+    
     result.len = hv_strlen(text);
     result.data = (u8*)arena_alloc(a, result.len);
     result.data = (u8*)text;
@@ -726,12 +716,12 @@ tmp_format_str8(Arena *allocator, char *fmt, ...)
 {
     String8 buffer;
     buffer.data = (u8*)arena_alloc(allocator, 2048);
-
+    
     va_list args;
-
+    
     va_start(args, fmt);
-    buffer.len = stbsp_vsnprintf((char*)buffer.data, 2047, fmt, args);
+    buffer.len = hv_vsnprintf((char*)buffer.data, 2047, fmt, args);
     va_end(args);
-
+    
     return buffer;
 }
