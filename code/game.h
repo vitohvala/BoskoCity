@@ -92,7 +92,9 @@ struct Memory {
 
     GameState *state;
     GameInput *input;
-    \
+    
+    Vec2 screen_size;
+
     f32 dt;
 };
 

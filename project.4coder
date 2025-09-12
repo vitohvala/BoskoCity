@@ -14,7 +14,8 @@ blacklist_patterns = {
 load_paths = {
 	{ 
 		{
-			{".", .relative=true, .recursive=true, },
+			{ ".", .relative=true, .recursive=true, },
+            { "/code", .relative=true, .recursive=true, }, 
 		},  .os = "linux"
 	},
 };
@@ -22,7 +23,7 @@ load_paths = {
 command_list = {
 	{
         .name = "build",
-        .out = "*compilation",
+        .out = "*compilation*",
         .footer_panel = true,
         .cursor_at_end = true,
         .cmd = {
@@ -53,7 +54,7 @@ command_list = {
     }
 };
 
-fkey_command[9] = "build";
+fkey_command[1] = "build";
 fkey_command[8] = "build_dll";
 
 
