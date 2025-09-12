@@ -60,7 +60,7 @@ static PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback_ptr;
 static PFNGLGETSTRINGPROC glGetString_ptr;
 
 
-void *platform_load_glfunc(char *func_name);
+void *platform_load_glfunc(const char *func_name);
 
 void
 gl_load_functions(void)

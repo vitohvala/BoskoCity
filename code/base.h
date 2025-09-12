@@ -77,7 +77,7 @@
 #define CLAMP(A, X, B) (((X) < (A)) ? (A) : ((X) > (B)) ? (B) : (X))
 
 #include <stdint.h>
-#if COMPILER_CLANG || COMPILER_GCC 
+#if COMPILER_CLANG || COMPILER_GCC
 #include <stddef.h>
 #endif
 
@@ -234,7 +234,7 @@ function f32 v3_length(Vec3 v);
 struct String8 {
     u8 *data;
     usize len;
-    
+
     u8& operator[](usize index) {
         Assert(len > index);
         return data[index];
@@ -244,7 +244,7 @@ struct String8 {
 struct String16 {
     u16 *data;
     usize len;
-    
+
     u16& operator[](usize index) {
         Assert(len > index);
         return data[index];
@@ -254,7 +254,7 @@ struct String16 {
 struct String32 {
     u32 *data;
     usize len;
-    
+
     u32& operator[](usize index) {
         Assert(len > index);
         return data[index];
@@ -277,8 +277,8 @@ struct Arena {
 };
 
 struct Console {
-    void (*writef)(usize level, char *format, ...);
-    void (*writef_error)(char *format, ...);
+    void (*writef)(usize level, const char *format, ...);
+    void (*writef_error)(const char *format, ...);
 };
 
 //global Console console = {};
