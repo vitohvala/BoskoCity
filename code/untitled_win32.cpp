@@ -92,6 +92,7 @@ struct DxContext{
     D3D11_VIEWPORT viewport;
     ID3D11VertexShader *vertex_shader;
     ID3D11PixelShader *pixel_shader;
+    ID3D11PixelShader *circle_shader;
     ID3D11ShaderResourceView *sprite_SRV;
     ID3D11Buffer *sprite_buffer;
     ID3D11RasterizerState *rstate;
@@ -443,6 +444,7 @@ d3d_free(DxContext *d)
     SAFE_RELEASE(d->swapchain);
     SAFE_RELEASE(d->vertex_shader);
     SAFE_RELEASE(d->pixel_shader);
+    SAFE_RELEASE(d->circle_shader);
     SAFE_RELEASE(d->sprite_SRV);
     SAFE_RELEASE(d->sprite_buffer);
     SAFE_RELEASE(d->rstate);
@@ -599,6 +601,14 @@ d3d_init(HWND handle) {
 
         ps_blob->Release();
 
+        compile_shader("circle_main", "ps_5_0", &ps_blob);
+        res = d3d.device->CreatePixelShader(ps_blob->GetBufferPointer(),
+                                            ps_blob->GetBufferSize(), nil,
+                                            &d3d.circle_shader);
+        hv_assert(SUCCEEDED(res), "Create Circle Shader failed");
+
+        ps_blob->Release();
+
         D3D11_RECT scissor_rect;
         scissor_rect.left = (LONG)d3d.viewport.TopLeftX;
         scissor_rect.top = (LONG)d3d.viewport.TopLeftY;
@@ -718,7 +728,7 @@ format_err_msg(DWORD dw) {
 
 //TODO: use string8????
 function void
-win32_console_write(char *text, usize level)
+win32_console_write(const char *text, usize level)
 {
     //puts(text);
     HANDLE h =  GetStdHandle(STD_OUTPUT_HANDLE);
@@ -740,7 +750,7 @@ win32_console_write(char *text, usize level)
 }
 
 function void
-win32_console_write2(char *text, usize level)
+win32_console_write2(const char *text, usize level)
 {
     //puts(text);
     HANDLE h =  GetStdHandle(STD_OUTPUT_HANDLE);
@@ -759,7 +769,7 @@ win32_console_write2(char *text, usize level)
 }
 
 function void
-win32_write_error(char *text)
+win32_write_error(const char *text)
 {
     #ifdef OS_GRAPHICAL
         DWORD dw = GetLastError();
@@ -792,7 +802,7 @@ win32_write_error(char *text)
 }
 
 function void
-win32_writef_error(char *fmt, ...)
+win32_writef_error(const char *fmt, ...)
 {
     char buffer[2048];
     va_list args;
@@ -805,7 +815,7 @@ win32_writef_error(char *fmt, ...)
 }
 
 function void
-win32_console_writef(usize level, char *fmt, ...)
+win32_console_writef(usize level, const char *fmt, ...)
 {
     char buffer[2048];
     va_list args;
@@ -819,7 +829,7 @@ win32_console_writef(usize level, char *fmt, ...)
 }
 
 function void
-win32_console_writef2(usize level, char *fmt, ...)
+win32_console_writef2(usize level, const char *fmt, ...)
 {
     char buffer[2048];
     va_list args;
@@ -949,7 +959,7 @@ win32_hot_reload_shader(DxContext *d)
 }
 
 function inline void
-d3d_render(DxContext *d, SpriteBatch *sb, b32 vsync = true)
+d3d_render(DxContext *d, SpriteBatch *sb, bool circle = false)
 {
     D3D11_MAPPED_SUBRESOURCE spr_msr = {};
 
@@ -959,9 +969,6 @@ d3d_render(DxContext *d, SpriteBatch *sb, b32 vsync = true)
     }
     d->dcontext->Unmap(d->sprite_buffer, 0);
 
-    d->dcontext->OMSetRenderTargets(1, &d->framebuffer_rtv, nullptr);
-
-    d->dcontext->ClearRenderTargetView(d->framebuffer_rtv, (f32[]){0.0f, 0.0f, 0.0f, 1.0f});
 
     d->dcontext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     d->dcontext->RSSetState(d->rstate);
@@ -969,13 +976,15 @@ d3d_render(DxContext *d, SpriteBatch *sb, b32 vsync = true)
     d->dcontext->VSSetShader(d->vertex_shader, nil, 0);
     d->dcontext->VSSetShaderResources(0, 1, &d->sprite_SRV);
     d->dcontext->VSSetConstantBuffers(0, 1, &d->constant_buffer);
-    d->dcontext->PSSetShader(d->pixel_shader, nil, 0);
+    if (circle) {
+        d->dcontext->PSSetShader(d->circle_shader, nil, 0);
+    } else {
+        d->dcontext->PSSetShader(d->pixel_shader, nil, 0);
+    }
     d->dcontext->PSSetShaderResources(1, 1, &d->atlas_SRV);
     d->dcontext->PSSetSamplers(0, 1, &d->sampler);
 
     d->dcontext->DrawInstanced(6, sb->count, 0, 0);
-
-    d->swapchain->Present(vsync, {});
 }
 
 function Win32Sound
@@ -1134,7 +1143,13 @@ hv_main(LPVOID param)
 
         if(game.update) game.update(&mem);
 
+        d.dcontext->OMSetRenderTargets(1, &d.framebuffer_rtv, nullptr);
+        d.dcontext->ClearRenderTargetView(d.framebuffer_rtv,
+                                          (f32[]){0.0f, 0.0f, 0.0f, 1.0f});
+
         d3d_render(&d, mem.sb);
+        d3d_render(&d, mem.circle_batch, true);
+        d.swapchain->Present(true, {});
 
         u64 ecounter = win32_get_perf_counter();
         dt = ((f32)ecounter - (f32)fcounter) / (f32)pfreq;

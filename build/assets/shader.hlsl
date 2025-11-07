@@ -8,6 +8,7 @@ struct vout {
     float4 position : SV_POSITION;
     float2 uv : UV;
     float4 color : COLOR;
+    float2 local_uv : LOCAL_UV;
 };
 
 struct vin {
@@ -67,11 +68,19 @@ vout vs_main(vin input) {
         float2(texpos.y, texpos.w)   // bottom right
     };
 
-
+    float2 local_uv[6] = {
+        float2(0.0, 1.0),  // top left
+        float2(1.0, 1.0),  // top right
+        float2(0.0, 0.0),  // bottom left
+        float2(0.0, 0.0),  // bottom left
+        float2(1.0, 1.0),  // top right
+        float2(1.0, 0.0)   // bottom right
+    };
 
     output.position = float4(pos.x, pos.y, 0, 1);
   //  output.color = float4(colors[vertex_ID], 1.0f);
     output.uv = uv[input.vertex_id];
+    output.local_uv = local_uv[input.vertex_id];
     output.color = float4(color, 1.0f);
     return output;
 }
@@ -81,4 +90,12 @@ float4 ps_main(vout input) : SV_TARGET {
     float4 color = atlastexture.Sample(pointsampler, input.uv);
     if (color.a == 0) discard;
     return color * input.color;
+}
+
+float4 circle_main(vout input) : SV_TARGET {
+    float2 uv = (input.local_uv * 2.0f - 1.0f);
+    float dist = 1.0f - length(uv);
+    if (dist < 0.0f) discard;
+    return input.color;
+    //return float4(dist, dist, dist, dist) * input.color;
 }

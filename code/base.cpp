@@ -1,30 +1,30 @@
 //#include "base.cpp"
 
-function inline  f32
+function inline f32
 f32_abs(f32 f)
 {
     return f < 0 ? -f : f;
 }
 
-function inline  f64
+function inline f64
 f64_abs(f64 f)
 {
     return f < 0 ? -f : f;
 }
 
-function inline  b32
+function inline b32
 f32_compare(f32 x, f32 y)
 {
     return (f32_abs(x - y) <= f32_epsilon * MAX(1.0f, MAX(x, y)));
 }
 
-function inline  b32
+function inline b32
 f64_compare(f64 x, f64 y)
 {
     return (f64_abs(x - y) <= f64_epsilon * MAX(1.0, MAX(x, y)));
 }
 
-function inline  f32
+function inline f32
 f32_radians(f32 degree)
 {
     return degree * (f32_pi / 180.0f);
@@ -74,6 +74,7 @@ function inline f32
 f32_inf(void)
 {
     //TODO:
+    //Not implemented yet
     return 0.0f;
 }
 function inline f64
@@ -509,15 +510,15 @@ m4_rotate(Mat4 mat, Vec3 v, f32 angle_radians)
     f32 t = 1.0f - c;
 
     rot.m0.x = x*x*t + c;
-    rot.m0.y = y*x*t + z*s;    // swapped
-    rot.m0.z = z*x*t - y*s;    // swapped
+    rot.m0.y = y*x*t + z*s;
+    rot.m0.z = z*x*t - y*s;
 
-    rot.m1.x = x*y*t - z*s;    // swapped
+    rot.m1.x = x*y*t - z*s;
     rot.m1.y = y*y*t + c;
-    rot.m1.z = z*y*t + x*s;    // swapped
+    rot.m1.z = z*y*t + x*s;
 
-    rot.m2.x = x*z*t + y*s;    // swapped
-    rot.m2.y = y*z*t - x*s;    // swapped
+    rot.m2.x = x*z*t + y*s;
+    rot.m2.y = y*z*t - x*s;
     rot.m2.z = z*z*t + c;
     rot.m3.w = 1.0f;
 

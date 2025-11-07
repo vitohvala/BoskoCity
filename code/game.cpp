@@ -9,8 +9,8 @@ hv_append(SpriteBatch *sb, Vec4 sprpos, Vec4 atlpos, Vec3 color)
 {
     sb->sprite[sb->count].pos = 	{ sprpos.x, sprpos.y };
     sb->sprite[sb->count].size = 	{ sprpos.z, sprpos.w };
-    sb->sprite[sb->count].aoffset = {atlpos.x, atlpos.y};
-    sb->sprite[sb->count].asize = 	{atlpos.z, atlpos.w};
+    sb->sprite[sb->count].aoffset = { atlpos.x, atlpos.y };
+    sb->sprite[sb->count].asize = 	{ atlpos.z, atlpos.w };
     sb->sprite[sb->count].color = 	color;
     sb->count++;
 }
@@ -80,6 +80,24 @@ draw_sprite_v2(SpriteBatch *sb, Vec2 pos, TextureName tname,Vec3 color = vec3(1.
 	hv_append(sb, sb_pos, sprite, color);
 }
 
+function inline void
+draw_circle(SpriteBatch *cb, Vec2 center, f32 radius, Vec3 color = vec3(1.0f))
+{
+
+	Vec4 pos = {center.x - radius, center.y - radius, radius + radius, radius + radius};
+	hv_append(cb, pos, atlas_glyphs[array_len(atlas_glyphs) - 8].rect, color);
+}
+
+
+function inline void
+draw_circle_lt(SpriteBatch *cb, Vec2 left_top, f32 radius, Vec3 color = vec3(1.0f))
+{
+	radius += radius;
+	Vec4 pos = {left_top.x, left_top.y, radius, radius};
+	hv_append(cb, pos, atlas_glyphs[array_len(atlas_glyphs) - 8].rect, color);
+}
+
+
 //function inline void
 //anim_helper(usize *animate_index, usize animation_index)
 //{
@@ -98,7 +116,7 @@ init_game(Memory *mem)
 	mem->state = (GameState*)arena_alloc(mem->permanent, sizeof(GameState));
 
 	mem->state->pos = vec2(75.0f);
-	mem->state->pos.x = 64.0f;
+//	mem->state->pos.x = 64.0f;
 
 	mem->state->vel = vec2(0.0f);
 }
@@ -140,10 +158,15 @@ UPDATE_FUNC(game_update)
     	log_info("Initializing Gamecode");
     	m->state->vel.x = 1.0f;
     	m->sb = (SpriteBatch *)arena_alloc(m->permanent, sizeof(SpriteBatch));
+    	m->circle_batch = (SpriteBatch *)arena_alloc(m->permanent, sizeof(SpriteBatch));
 	}
 
 	m->sb->sprite = (Sprite*)arena_alloc(m->transient, MAX_SPRITES * sizeof(Sprite));
 	m->sb->count = 0;
+
+	m->circle_batch->sprite =
+		(Sprite*)arena_alloc(m->transient, MAX_SPRITES * sizeof(Sprite));
+	m->circle_batch->count = 0;
 
 	GameState *lstate = m->state;
 	ControllerInput *kinput = &m->input->cinput[HV_Keyboard];
@@ -169,17 +192,12 @@ UPDATE_FUNC(game_update)
     //    lstate->grounded = true;
 	//}
 
-
-	lstate->pos.x += 360 * lstate->vel.x * m->dt;
-	if(lstate->pos.x + 32 > m->screen_size.x || lstate->pos.x < 0.0f) {
-		lstate->vel.x *= -1;
-	}
-
 	//lstate->pos = nextpos;
 	//lstate->vel.x = 0.0f;
 
 	//draw_rectangle(m->sb, {50, 500, 200, 20}, HV_GREEN);
 
-	draw_rectangle(m->sb, {lstate->pos.x, lstate->pos.y, 32, 32});
-	draw_text(m->sb, {10, 10},tmp_format_str8(m->temp, "%d", m->sb->count), HV_GREEN);
+	draw_rectangle(m->sb, {0, 0, 1280, 720});
+	draw_circle(m->circle_batch, {1280 / 2, 720 / 2}, 260, HV_RED);
+	//draw_text(m->sb, {10, 10},tmp_format_str8(m->temp, "%d", m->sb->count), HV_GREEN);
 }
